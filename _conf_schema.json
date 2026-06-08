@@ -1,0 +1,73 @@
+{
+  "tap_uid": {
+    "description": "TapTap 用户 ID",
+    "type": "string",
+    "default": "19675784"
+  },
+  "user_agent": {
+    "description": "爬虫浏览器 UA",
+    "type": "string",
+    "default": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+  },
+  "crawl_interval": {
+    "description": "爬取间隔（秒），默认 5 分钟，最低 60 秒",
+    "type": "int",
+    "default": 300
+  },
+  "crawl_timeout": {
+    "description": "HTTP 请求超时（秒）",
+    "type": "int",
+    "default": 15
+  },
+  "crawl_retry": {
+    "description": "失败重试次数",
+    "type": "int",
+    "default": 2
+  },
+  "access_mode": {
+    "description": "名单模式：whitelist（仅名单内可访问）或 blacklist（名单内禁止访问）",
+    "type": "string",
+    "options": ["whitelist", "blacklist"],
+    "default": "whitelist"
+  },
+  "group_list": {
+    "description": "群聊名单（群号列表，每行一个）",
+    "type": "list",
+    "default": []
+  },
+  "private_list": {
+    "description": "私聊名单（QQ号列表，每行一个）",
+    "type": "list",
+    "default": []
+  },
+  "push_groups": {
+    "description": "自动推送目标群号列表（每行一个）",
+    "type": "list",
+    "default": []
+  },
+  "push_privates": {
+    "description": "自动推送目标 QQ 号列表（每行一个）",
+    "type": "list",
+    "default": []
+  },
+  "trigger_keywords": {
+    "description": "触发关键词列表（每行一个）",
+    "type": "list",
+    "default": ["五维消息", "百分之一消息", "五维通知", "百分之一通知"]
+  },
+  "list_count": {
+    "description": "关键词触发时返回的消息条数",
+    "type": "int",
+    "default": 10
+  },
+  "max_history": {
+    "description": "SQLite 中保留的历史消息上限（最小 10，超出自动清理旧数据）",
+    "type": "int",
+    "default": 200
+  },
+  "interaction_timeout": {
+    "description": "序号交互超时（秒）",
+    "type": "int",
+    "default": 60
+  }
+}

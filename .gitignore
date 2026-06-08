@@ -1,0 +1,54 @@
+# System
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# CodeBuddy / Reasonix
+.codegraph/
+.reasonix/
+.skills/
+reasonix.toml
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+build/
+.vite/
+.cache/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Database / Runtime
+*.db
+*.sqlite
+*.sqlite3
+data/posts.db
+data/access_list.json
+uploads/
+tmp/
+temp/
+
+# Secrets
+*.pem
+*.key
+*.crt
+secrets/
