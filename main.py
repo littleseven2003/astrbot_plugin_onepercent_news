@@ -64,7 +64,7 @@ class OnePercentNewsPlugin(Star):
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._running = True
-        logger.info("百分之一消息推送插件已加载（v0.2.2），等待首次交互触发爬取")
+        logger.info("百分之一消息推送插件已加载（v0.2.3），等待首次交互触发爬取")
 
     # ---- 生命周期 ----
 
@@ -172,12 +172,9 @@ class OnePercentNewsPlugin(Star):
             )
             if handled:
                 if reply_text:
-                    # aiocqhttp 不支持 Image(file=url) 组件方式，
-                    # 改用 [CQ:image,file=<url>] 嵌入文本，一条消息发出
-                    text = reply_text
-                    for img_url in image_urls:
-                        text += f"\n[CQ:image,file={img_url}]"
-                    yield event.plain_result(text)
+                    yield event.plain_result(reply_text)
+                for img_url in image_urls:
+                    yield event.image_result(img_url)
                 event.stop_event()
             return
 
