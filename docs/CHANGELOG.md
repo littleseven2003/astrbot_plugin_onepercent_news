@@ -1,5 +1,16 @@
 # 更新日志
 
+## v0.2.2 - 2026-06-09
+
+### 修复
+
+- **图片发送失败**：`Image(file=http_url)` 不被 aiocqhttp/NapCat 识别
+  - 改用 `[CQ:image,file=<url>]` 嵌入文本，一条 `plain_result` 发出
+  - 图文在同一消息中按序展示
+- `push_handler` 方式二同步改为 `[CQ:image]` 嵌入式发送
+
+---
+
 ## v0.2.1 - 2026-06-09
 
 ### 优化

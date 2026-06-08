@@ -8,8 +8,7 @@ import asyncio
 from pathlib import Path
 
 from astrbot.api import logger  # 使用 AstrBot 内置 logger，确保日志可见
-from astrbot.api.event import MessageChain, filter, AstrMessageEvent
-from astrbot.api.message_components import Plain, Image
+from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Star, Context
 
 from .crawler.taptap_client import TapTapClient
@@ -65,7 +64,7 @@ class OnePercentNewsPlugin(Star):
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._running = True
-        logger.info("百分之一消息推送插件已加载（v0.2.1），等待首次交互触发爬取")
+        logger.info("百分之一消息推送插件已加载（v0.2.2），等待首次交互触发爬取")
 
     # ---- 生命周期 ----
 
@@ -173,11 +172,12 @@ class OnePercentNewsPlugin(Star):
             )
             if handled:
                 if reply_text:
-                    chain = MessageChain()
-                    chain.chain = [Plain(text=reply_text)]
+                    # aiocqhttp 不支持 Image(file=url) 组件方式，
+                    # 改用 [CQ:image,file=<url>] 嵌入文本，一条消息发出
+                    text = reply_text
                     for img_url in image_urls:
-                        chain.chain.append(Image(file=img_url))
-                    yield chain
+                        text += f"\n[CQ:image,file={img_url}]"
+                    yield event.plain_result(text)
                 event.stop_event()
             return
 

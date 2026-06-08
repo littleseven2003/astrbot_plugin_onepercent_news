@@ -3,7 +3,6 @@
 from typing import Any
 
 from astrbot.api import logger
-from astrbot.api.message_components import Plain, Image
 
 from ..crawler.parser import PostItem
 from ..filter.access_control import AccessControl
@@ -76,17 +75,21 @@ class PushHandler:
         except Exception as e:
             logger.warning(f"context.send_message 失败，尝试 MessageChain: {e}")
 
-        # 方式二：平台适配器 send_by_session + MessageChain
+        # 方式二：平台适配器 send_by_session
         try:
             adapter = self._get_adapter()
             if adapter:
                 from astrbot.api.event import MessageChain
+                from astrbot.api.message_components import Plain
                 from astrbot.core.platform.astr_message_event import MessageSesion
 
-                chain = MessageChain()
-                chain.chain = [Plain(text=text)]
+                # 图片用 [CQ:image] 嵌入文本（aiocqhttp 不支持 Image(file=url)）
+                full_text = text
                 for img_url in images:
-                    chain.chain.append(Image(file=img_url))
+                    full_text += f"\n[CQ:image,file={img_url}]"
+
+                chain = MessageChain()
+                chain.chain = [Plain(text=full_text)]
 
                 session = MessageSesion(session_id=target_id, message_type=msg_type)
                 await adapter.send_by_session(session, chain)
