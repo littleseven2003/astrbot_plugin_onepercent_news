@@ -2,17 +2,12 @@
 百分之一消息推送插件 - 主入口
 
 自动同步 TapTap 官方消息（用户"五维互娱"）到 QQ 群聊/私聊。
-
-AstrBot v4.25.5 兼容注意：
-- __init__ 中用 loop.call_later 延迟调度爬虫（事件循环就绪后才能执行）
-- on_astrbot_loaded 作为补充触发（首次启动时）
-- on_message 首次交互作为兜底触发（热重载场景）
 """
 
 import asyncio
-import logging
 from pathlib import Path
 
+from astrbot.api import logger  # 使用 AstrBot 内置 logger，确保日志可见
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Star, Context
 
@@ -22,8 +17,6 @@ from .cache.post_cache import PostCache
 from .filter.access_control import AccessControl
 from .handler.query_handler import QueryHandler
 from .handler.push_handler import PushHandler
-
-logger = logging.getLogger(__name__)
 
 PLUGIN_DIR = Path(__file__).parent
 DATA_DIR = PLUGIN_DIR / "data"
@@ -37,7 +30,7 @@ class OnePercentNewsPlugin(Star):
         self.config = config or {}
         self._running = False
         self._crawl_task: asyncio.Task | None = None
-        self._initial_crawl_done = False  # 首次爬取是否已完成
+        self._initial_crawl_done = False
 
         # 初始化各模块
         self.tap_client = TapTapClient(
@@ -69,56 +62,41 @@ class OnePercentNewsPlugin(Star):
             config=self.config,
         )
 
-        # 确保 data 目录存在
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-        # 立即设置运行标志（消息处理器可工作）
         self._running = True
+        logger.info("百分之一消息推送插件已加载（v0.1.5），等待首次交互触发爬取")
 
-        # ---- 延迟调度首次爬取 ----
-        # asyncio.ensure_future() 在 __init__ 同步上下文中不可靠，
-        # 改用 loop.call_later 将爬取任务注册到事件循环，延迟执行。
-        try:
-            loop = asyncio.get_event_loop()
-            loop.call_later(5, self._trigger_initial_crawl_via_loop)
-            logger.info("📋 百分之一消息推送插件已初始化，首次爬取将在 5 秒后开始")
-        except Exception as e:
-            logger.warning(f"无法通过事件循环调度爬虫（将在首次交互时触发）: {e}")
-
-    # ---------- 生命周期 ----------
-
-    def _trigger_initial_crawl_via_loop(self):
-        """通过事件循环回调触发首次爬取（call_later 回调是同步的，需要再次调度异步任务）"""
-        if self._initial_crawl_done:
-            return
-        asyncio.ensure_future(self._do_initial_crawl())
+    # ---- 生命周期 ----
 
     @filter.on_astrbot_loaded()
     async def _on_astrbot_loaded(self):
-        """AstrBot 首次启动完全加载后触发爬取（补充保障）"""
+        """AstrBot 首次启动完全加载后触发爬取"""
         if not self._initial_crawl_done:
-            logger.info("🔔 AstrBot 加载完成，触发首次爬取")
+            logger.info("AstrBot 加载完成，触发首次爬取")
             await self._do_initial_crawl()
 
     async def _do_initial_crawl(self):
-        """执行首次爬取并启动后台定时循环。幂等：只执行一次。"""
+        """首次爬取 + 启动定时循环。幂等。"""
         if self._initial_crawl_done:
             return
         self._initial_crawl_done = True
 
-        logger.info("🚀 开始首次爬取...")
+        logger.info("🚀 执行首次爬取...")
         try:
             await self._do_crawl()
         except Exception as e:
             logger.error(f"首次爬取异常: {e}", exc_info=True)
 
-        # 启动后台定时爬取循环
         crawl_interval = max(self.config.get("crawl_interval", 300), 60)
         self._crawl_task = asyncio.ensure_future(self._crawl_loop(crawl_interval))
-        logger.info(f"✅ 后台爬虫已启动，定时间隔: {crawl_interval}s")
+        logger.info(f"后台爬虫已启动，间隔 {crawl_interval}s")
+
+    async def _ensure_crawled(self):
+        """确保至少执行过一次爬取。供 on_message 在回复前调用。"""
+        if not self._initial_crawl_done:
+            await self._do_initial_crawl()
 
     async def terminate(self):
-        """插件停止"""
         self._running = False
         if self._crawl_task:
             self._crawl_task.cancel()
@@ -129,52 +107,44 @@ class OnePercentNewsPlugin(Star):
         logger.info("百分之一消息推送插件已停止")
 
     async def _crawl_loop(self, interval: int):
-        """后台定时爬取循环"""
         while self._running:
             try:
                 await self._do_crawl()
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"爬取循环异常: {e}", exc_info=True)
+                logger.error(f"定时爬取异常: {e}", exc_info=True)
             await asyncio.sleep(interval)
 
     async def _do_crawl(self):
-        """执行一次爬取并推送新消息"""
-        logger.info("🔍 开始爬取 TapTap 动态...")
+        logger.info("🔍 请求 TapTap API...")
         try:
             raw_data = await self.tap_client.fetch_user_moments()
             posts = self.parser.parse(raw_data)
-            fetched_count = len(posts)
+            fetched = len(posts)
 
-            # 去重：分离新帖子
             new_posts = []
             for post in posts:
                 if self.cache.is_new(post.post_id):
                     new_posts.append(post)
-
-            # 写入缓存
             for post in new_posts:
                 self.cache.mark_pushed(post)
 
-            # 获取缓存总数
-            total_count = len(self.cache.get_recent_posts(
+            total = len(self.cache.get_recent_posts(
                 self.config.get("max_history", 200)
             ))
 
             if new_posts:
                 logger.info(
-                    f"📥 爬取结果: 本次获取 {fetched_count} 条，"
-                    f"新增 {len(new_posts)} 条，当前共 {total_count} 条"
+                    f"📥 爬取完成：获取 {fetched} 条，新增 {len(new_posts)} 条，"
+                    f"缓存共 {total} 条"
                 )
                 await self.push_handler.push_new_posts(new_posts, self.config)
             else:
                 logger.info(
-                    f"📥 爬取结果: 本次获取 {fetched_count} 条，"
-                    f"无新消息，当前共 {total_count} 条"
+                    f"📥 爬取完成：获取 {fetched} 条，无新增，缓存共 {total} 条"
                 )
 
-            # 清理旧数据
             self.cache.prune_old_posts()
         except Exception as e:
             logger.error(f"❌ 爬取失败: {e}", exc_info=True)
@@ -183,32 +153,22 @@ class OnePercentNewsPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
-        """处理所有消息事件"""
         if not self._running:
             return
-
-        # 兜底：首次爬取还没完成，立即异步触发（不阻塞当前消息处理）
-        if not self._initial_crawl_done:
-            asyncio.ensure_future(self._do_initial_crawl())
 
         message = event.message_str.strip() if hasattr(event, "message_str") else ""
         if not message:
             return
 
-        # 获取会话信息
         user_id = str(event.get_sender_id()) if hasattr(event, "get_sender_id") else ""
         session_id = str(event.get_session_id()) if hasattr(event, "get_session_id") else ""
-        is_group = hasattr(event, "get_group_id") and event.get_group_id()
-
-        group_id = str(event.get_group_id()) if is_group else ""
+        group_id = str(event.get_group_id()) if (hasattr(event, "get_group_id") and event.get_group_id()) else ""
 
         # 序号交互（纯数字）
         if message.isdigit():
             index = int(message)
             handled, reply_text = self.query_handler.handle_index_reply(
-                user_id=user_id,
-                session_id=session_id,
-                index=index,
+                user_id=user_id, session_id=session_id, index=index,
             )
             if handled:
                 if reply_text:
@@ -222,10 +182,11 @@ class OnePercentNewsPlugin(Star):
             ["五维消息", "百分之一消息", "五维通知", "百分之一通知"],
         )
         if message in keywords:
+            # 在回复前同步等待爬取完成，确保用户看到的不是"暂无消息"
+            await self._ensure_crawled()
+
             handled, reply_text = self.query_handler.handle_keyword_trigger(
-                user_id=user_id,
-                session_id=session_id,
-                group_id=group_id,
+                user_id=user_id, session_id=session_id, group_id=group_id,
             )
             if handled:
                 if reply_text:
