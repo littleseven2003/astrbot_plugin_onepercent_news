@@ -1,5 +1,21 @@
 # 更新日志
 
+## v0.1.1 - 2026-06-08
+
+### 修复
+
+- 修复插件 `on_message` 未被 AstrBot 调用的 bug（缺少 `@filter.event_message_type(ALL)` 装饰器）
+- 修复关键词/序号消息被 LLM 重复消费的问题（添加 `event.stop_event()`）
+- 修复消息回复方式错误：`event.reply()` 不存在 → 改用 `yield event.plain_result()`
+- 修复 `push_handler` 消息发送 API 不可用的问题（改用 `context.send_message` AstrBot 标准 API）
+
+### 重构
+
+- `query_handler` 改为纯数据层：`handle_keyword_trigger` / `handle_index_reply` 改为同步方法，返回 `(bool, str|None)` 元组
+- 消息回复统一由 `main.py` 用 `yield` 方式发送
+
+---
+
 ## v0.1.0 - 2026-06-08
 
 ### 新增
