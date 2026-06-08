@@ -1,5 +1,21 @@
 # 更新日志
 
+## v0.1.3 - 2026-06-09
+
+### 修复
+
+- **爬虫不执行**：移除 Playwright 依赖，改用 httpx + X_UA 直连 TapTap API（参照 RSSHub 方案）
+  - 根因：AstrBot 事件循环在 `__init__` 阶段未就绪，`asyncio.ensure_future()` 无法启动爬虫
+  - 改用 `@filter.on_astrbot_loaded()` 生命周期钩子延迟启动，AstrBot 完全加载后自动执行首次爬取
+  - httpx 直连已验证可用（无需浏览器/Chromium）
+
+### 调整
+
+- 移除 `playwright` 依赖，减少部署环境要求
+- 版本号更新到 0.1.3
+
+---
+
 ## v0.1.2 - 2026-06-09
 
 ### 修复

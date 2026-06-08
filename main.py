@@ -66,16 +66,31 @@ class OnePercentNewsPlugin(Star):
         # 确保 data 目录存在
         DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-        # 初始化完成后立即设为运行状态并启动爬虫
-        # 注意：AstrBot 不会调用 start() 生命周期钩子，必须在 __init__ 中启动
-        self._start_crawl()
-
-    def _start_crawl(self):
-        """启动后台爬取任务（在 __init__ 末尾调用）"""
+        # 设置运行标志（消息处理器一加载即可用）
         self._running = True
+        logger.info("百分之一消息推送插件已初始化（爬虫稍后由 on_astrbot_loaded 启动）")
+
+    # ---- 生命周期 ----
+
+    @filter.on_astrbot_loaded()
+    async def _on_astrbot_loaded(self):
+        """AstrBot 完全加载后启动后台爬虫。
+        
+        使用 on_astrbot_loaded 钩子而非 __init__ 中启动，
+        是因为 AstrBot 事件循环在 __init__ 阶段可能尚未就绪。
+        """
         crawl_interval = max(self.config.get("crawl_interval", 300), 60)
-        logger.info(f"百分之一消息推送插件启动，爬取间隔: {crawl_interval}s")
+        logger.info(f"🚀 启动后台爬虫，间隔: {crawl_interval}s")
+        
+        # 立即执行首次爬取
+        try:
+            await self._do_crawl()
+        except Exception as e:
+            logger.error(f"首次爬取失败: {e}", exc_info=True)
+        
+        # 启动定时循环
         self._crawl_task = asyncio.ensure_future(self._crawl_loop(crawl_interval))
+        logger.info("✅ 后台爬虫已启动")
 
     async def terminate(self):
         """插件停止"""
