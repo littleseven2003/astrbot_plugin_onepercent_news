@@ -1,12 +1,11 @@
 """消息处理模块 - 自动推送新消息"""
 
-import logging
 from typing import Any
+
+from astrbot.api import logger
 
 from ..crawler.parser import PostItem
 from ..filter.access_control import AccessControl
-
-logger = logging.getLogger(__name__)
 
 
 class PushHandler:

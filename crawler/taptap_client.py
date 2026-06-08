@@ -4,22 +4,22 @@
 参照 RSSHub 方案，无需 Playwright/无头浏览器。
 
 API 端点:
-  GET /webapiv2/feed/v7/by-user?user_id={uid}&from=0&limit=20&X-UA={x_ua}
+  GET /webapiv2/feed/v7/by-user?user_id={uid}&from=0&limit=10&X-UA={x_ua}
+  注意: limit 最大为 10，超过会返回 400
 """
 
 import asyncio
-import logging
 from typing import Any
 from urllib.parse import quote
 
 import httpx
-
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 # TapTap WebApp 设备标识（来源：RSSHub utils.tsx）
 X_UA = quote("V=1&PN=WebApp&VN=0.1.0&LANG=zh_CN&PLT=PC")
 TAP_BASE = "https://www.taptap.cn"
 API_USER_FEED = "/webapiv2/feed/v7/by-user"
+API_LIMIT = 10  # TapTap API 限制：limit 最大 10
 
 
 class TapTapClient:
@@ -51,7 +51,10 @@ class TapTapClient:
         Returns:
             API 响应列表，每个元素为 {"url": str, "body": dict}
         """
-        api_url = f"{TAP_BASE}{API_USER_FEED}?user_id={self.uid}&from=0&limit=20&X-UA={X_UA}"
+        api_url = (
+            f"{TAP_BASE}{API_USER_FEED}"
+            f"?user_id={self.uid}&from=0&limit={API_LIMIT}&X-UA={X_UA}"
+        )
         headers = {
             "User-Agent": self.user_agent,
             "Accept": "application/json",
@@ -64,17 +67,38 @@ class TapTapClient:
                     timeout=self.timeout, follow_redirects=True
                 ) as client:
                     r = await client.get(api_url, headers=headers)
-                    r.raise_for_status()
                     data = r.json()
+                    success = data.get("success", r.status_code == 200)
+
+                    if not success and r.status_code == 200:
+                        msg = data.get("data", {}).get("msg", str(data)[:100])
+                        logger.warning(
+                            f"TapTap API 返回 success=false: {msg}"
+                        )
+                        if attempt < self.retry:
+                            await asyncio.sleep(2 ** (attempt + 1))
+                            continue
+                        return []
+
+                    if not r.is_success:
+                        msg = data.get("data", {}).get("msg", r.text[:200])
+                        logger.warning(
+                            f"TapTap API HTTP {r.status_code}: {msg}"
+                        )
+                        if attempt < self.retry:
+                            await asyncio.sleep(2 ** (attempt + 1))
+                            continue
+                        return []
+
                     items = data.get("data", {}).get("list", [])
                     logger.info(
-                        f"TapTap API 返回 {len(items)} 条帖子 "
-                        f"(attempt {attempt + 1}/{self.retry + 1})"
+                        f"TapTap API 返回 {len(items)} 条帖子"
                     )
                     return [{"url": api_url, "body": data}]
+
             except Exception as e:
                 logger.warning(
-                    f"TapTap API 请求失败 (attempt {attempt + 1}/{self.retry + 1}): {e}"
+                    f"TapTap API 请求异常 (attempt {attempt + 1}/{self.retry + 1}): {e}"
                 )
                 if attempt < self.retry:
                     await asyncio.sleep(2 ** (attempt + 1))

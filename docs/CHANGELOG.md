@@ -1,5 +1,17 @@
 # 更新日志
 
+## v0.1.6 - 2026-06-09
+
+### 修复
+
+- **爬虫获取 0 条**：`limit=20` 超出 TapTap API 限制（最大 10），请求返回 400
+  - 改为 `limit=10`，已验证正常返回 10 条帖子
+- **爬虫错误日志不可见**：所有模块统一改用 `from astrbot.api import logger`
+  - 之前 `taptap_client/cache/parser/filter/handler` 用 `logging.getLogger(__name__)`，日志在 AstrBot 面板不可见，错误被静默吞掉
+- 增强 HTTP 错误处理：记录 HTTP 状态码和响应体，区分网络异常和 API 业务错误
+
+---
+
 ## v0.1.5 - 2026-06-09
 
 ### 修复

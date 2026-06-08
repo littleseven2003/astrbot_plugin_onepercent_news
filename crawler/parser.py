@@ -8,13 +8,11 @@
 """
 
 import json
-import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from astrbot.api import logger
 from bs4 import BeautifulSoup
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass

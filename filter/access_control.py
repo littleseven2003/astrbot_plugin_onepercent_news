@@ -1,10 +1,9 @@
 """过滤模块 - 白名单/黑名单访问控制"""
 
 import json
-import logging
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 class AccessControl:

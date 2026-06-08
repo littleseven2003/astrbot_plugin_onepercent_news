@@ -1,13 +1,12 @@
 """缓存模块 - SQLite 消息存储与去重"""
 
 import json
-import logging
 import sqlite3
 from pathlib import Path
 
-from ..crawler.parser import PostItem
+from astrbot.api import logger
 
-logger = logging.getLogger(__name__)
+from ..crawler.parser import PostItem
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS posts (

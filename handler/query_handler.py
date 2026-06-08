@@ -1,13 +1,12 @@
 """消息处理模块 - 关键词触发与序号交互"""
 
-import logging
 import time
 from typing import Any
 
+from astrbot.api import logger
+
 from ..cache.post_cache import PostCache
 from ..filter.access_control import AccessControl
-
-logger = logging.getLogger(__name__)
 
 
 class QueryHandler:
