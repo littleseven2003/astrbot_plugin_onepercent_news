@@ -1,5 +1,19 @@
 # 更新日志
 
+## v0.1.2 - 2026-06-09
+
+### 修复
+
+- **致命 Bug**：修复 `_running` 永远为 False 导致 `on_message` 和爬虫均不执行的问题
+  - 根因：`start()` 不是 AstrBot 生命周期钩子，AstrBot 只会调用 `__init__` 和 `terminate`
+  - 修复：删除 `start()`，在 `__init__` 末尾调用 `_start_crawl()` 立即启动
+
+### 调整
+
+- 版本号从 0.1.0 更新到 0.1.2（metadata.yaml、pyproject.toml）
+
+---
+
 ## v0.1.1 - 2026-06-08
 
 ### 修复

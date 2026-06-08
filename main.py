@@ -66,12 +66,16 @@ class OnePercentNewsPlugin(Star):
         # 确保 data 目录存在
         DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    async def start(self):
-        """插件启动"""
+        # 初始化完成后立即设为运行状态并启动爬虫
+        # 注意：AstrBot 不会调用 start() 生命周期钩子，必须在 __init__ 中启动
+        self._start_crawl()
+
+    def _start_crawl(self):
+        """启动后台爬取任务（在 __init__ 末尾调用）"""
         self._running = True
         crawl_interval = max(self.config.get("crawl_interval", 300), 60)
         logger.info(f"百分之一消息推送插件启动，爬取间隔: {crawl_interval}s")
-        self._crawl_task = asyncio.create_task(self._crawl_loop(crawl_interval))
+        self._crawl_task = asyncio.ensure_future(self._crawl_loop(crawl_interval))
 
     async def terminate(self):
         """插件停止"""
