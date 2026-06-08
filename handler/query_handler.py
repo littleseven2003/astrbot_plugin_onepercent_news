@@ -33,21 +33,25 @@ class QueryHandler:
         session_id: str,
         group_id: str,
         event: Any,
-    ):
-        """处理关键词触发：回复最近消息列表"""
+    ) -> bool:
+        """处理关键词触发：回复最近消息列表。
+
+        Returns:
+            True 表示消息已被插件处理（应阻止 LLM），False 表示未处理。
+        """
         # 权限检查
         if group_id:
             if not self.access_control.check_group(group_id):
-                return
+                return False
         else:
             if not self.access_control.check_private(user_id):
-                return
+                return False
 
         # 获取最近消息
         posts = self.cache.get_recent_posts(self.list_count)
         if not posts:
             await self._reply(event, "暂无消息，请稍后再试。")
-            return
+            return True
 
         # 构建列表回复
         lines = ["【百分之一 · 最近消息】", ""]
@@ -61,6 +65,7 @@ class QueryHandler:
         self._pending_users[session_id] = (user_id, time.time())
 
         await self._reply(event, "\n".join(lines))
+        return True
 
     async def handle_index_reply(
         self,
@@ -68,26 +73,30 @@ class QueryHandler:
         session_id: str,
         index: int,
         event: Any,
-    ):
-        """处理序号回复：回复单条消息详情"""
+    ) -> bool:
+        """处理序号回复：回复单条消息详情。
+
+        Returns:
+            True 表示消息已被插件处理（应阻止 LLM），False 表示未匹配。
+        """
         # 检查是否在等待状态
         pending = self._pending_users.get(session_id)
         if pending is None:
-            return
+            return False
 
         pending_user_id, timestamp = pending
         if pending_user_id != user_id:
-            return
+            return False
 
         # 检查超时
         if time.time() - timestamp > self.interaction_timeout:
             del self._pending_users[session_id]
-            return
+            return False
 
         # 获取消息详情
         post = self.cache.get_post_by_index(index, self.list_count)
         if post is None:
-            return
+            return True  # 序号无效但确实在交互中，阻止 LLM
 
         # 构建详情回复
         lines = [
@@ -113,6 +122,7 @@ class QueryHandler:
         del self._pending_users[session_id]
 
         await self._reply(event, "\n".join(lines))
+        return True
 
     async def _reply(self, event: Any, message: str):
         """发送回复消息"""
