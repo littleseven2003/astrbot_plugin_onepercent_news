@@ -1,5 +1,16 @@
 # 更新日志
 
+## v0.2.4 - 2026-06-09
+
+### 修复
+
+- **图文分散为多条消息且顺序错误**：多 `yield` 导致框架每次发送独立消息
+  - 改为构造单一 `MessageChain`：`[Plain(text), Image(url=url1), Image(url=url2), ...]`
+  - 一次 `yield chain` → 框架收到完整图文链 → aiocqhttp 适配器一次发送
+  - `Image(url=...)` 替代 `Image(file=...)` 以确保 HTTP URL 被正确解析
+
+---
+
 ## v0.2.3 - 2026-06-09
 
 ### 修复

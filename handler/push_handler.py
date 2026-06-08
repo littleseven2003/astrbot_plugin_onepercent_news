@@ -66,14 +66,19 @@ class PushHandler:
         try:
             # 方式一：context.send_message（aiocqhttp 标准 API）
             if hasattr(self.context, "send_message"):
-                await self.context.send_message(msg_type, target_id, text)
-                for img_url in images:
-                    await self.context.send_message(msg_type, target_id, img_url)
+                # 合并文本和图片为一条 MessageChain 发送
+                from astrbot.api.event import MessageChain
+                from astrbot.api.message_components import Plain, Image
+                chain = MessageChain()
+                chain.chain = [Plain(text=text)] + [
+                    Image(url=u) for u in images
+                ]
+                await self.context.send_message(msg_type, target_id, chain)
                 return
         except Exception as e:
             logger.warning(f"context.send_message 失败，尝试 MessageChain: {e}")
 
-        # 方式二：平台适配器 send_by_session（逐条发送）
+        # 方式二：平台适配器 send_by_session（一条 MessageChain）
         try:
             adapter = self._get_adapter()
             if adapter:
@@ -81,18 +86,13 @@ class PushHandler:
                 from astrbot.api.message_components import Plain, Image
                 from astrbot.core.platform.astr_message_event import MessageSesion
 
+                chain = MessageChain()
+                chain.chain = [Plain(text=text)] + [
+                    Image(url=u) for u in images
+                ]
+
                 session = MessageSesion(session_id=target_id, message_type=msg_type)
-
-                # 发送文本
-                text_chain = MessageChain()
-                text_chain.chain = [Plain(text=text)]
-                await adapter.send_by_session(session, text_chain)
-
-                # 逐张发图
-                for img_url in images:
-                    img_chain = MessageChain()
-                    img_chain.chain = [Image(file=img_url)]
-                    await adapter.send_by_session(session, img_chain)
+                await adapter.send_by_session(session, chain)
                 return
         except Exception as e:
             logger.warning(f"MessageChain 发送失败: {e}")
