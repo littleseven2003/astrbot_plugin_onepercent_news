@@ -465,27 +465,33 @@ TapTap 移动端 API 通常鉴权更宽松，可通过抓包 App 请求获取端
 ## 11. 开发阶段建议
 
 ### Phase 1: 项目初始化 + TapTap API 探索
-- [ ] 创建插件目录结构；
-- [ ] 编写 `metadata.yaml`、`requirements.txt`、`_conf_schema.json`；
-- [ ] 编写 `main.py` 最小可用 Star 插件骨架；
-- [ ] **关键任务**：通过浏览器 DevTools 抓包，确定 TapTap 用户动态的公开 API 端点和响应结构；
-- [ ] 编写 `taptap_client.py` + `parser.py`，实现单次请求并成功解析帖子列表；
-- [ ] 单元测试：手动触发爬取，验证能正确获取五维互娱的帖子；
-- [ ] Git 提交。
+- [x] 创建插件目录结构；
+- [x] 编写 `metadata.yaml`、`_conf_schema.json`；
+- [x] 编写 `main.py` 最小可用 Star 插件骨架；
+- [x] **关键任务**：通过 Playwright 无头浏览器 + RSSHub X_UA 公式，确定 TapTap 用户动态的公开 API 端点；
+- [x] 编写 `taptap_client.py` + `parser.py`，实现单次请求并成功解析帖子列表；
+- [x] 单元测试：手动触发爬取，验证能正确获取五维互娱的帖子；
+- [x] Git 提交。
+
+> **API 发现记录**：
+> - 确认端点：`GET /webapiv2/feed/v7/by-user?user_id={uid}&from=0&limit=20&X-UA=...`
+> - X_UA 公式：`V=1&PN=WebApp&VN=0.1.0&LANG=zh_CN&PLT=PC`（来源：RSSHub）
+> - 响应结构：`data.list[].moment` 嵌套，关键字段 `id_str`、`topic.title`、`topic.summary`、`sharing.url`、`created_time`(Unix 时间戳)
+> - 爬取方案：Playwright 无头浏览器 → 页面内 fetch API（继承浏览器 session），httpx 兜底
 
 ### Phase 2: 缓存 + 推送闭环
-- [ ] 编写 `post_cache.py`，实现 JSON 文件读写 + 去重；
-- [ ] 编写 `push_handler.py`，实现向指定群聊/私聊推送消息；
-- [ ] 在 `main.py` 中注册 `asyncio.create_task()` 后台定时任务；
-- [ ] 集成测试：启动插件，验证新帖自动推送到目标 QQ 群；
-- [ ] Git 提交。
+- [x] 编写 `post_cache.py`，实现 SQLite 读写 + 去重（改用 SQLite 替代 JSON，见设计文档 6.2 节）；
+- [x] 编写 `push_handler.py`，实现向指定群聊/私聊推送消息；
+- [x] 在 `main.py` 中注册 `asyncio.create_task()` 后台定时任务；
+- [ ] 集成测试：启动插件，验证新帖自动推送到目标 QQ 群（需 AstrBot + NapCat 环境）；
+- [x] Git 提交。
 
 ### Phase 3: 关键词交互
-- [ ] 编写 `access_control.py`，实现白名单/黑名单逻辑；
-- [ ] 编写 `query_handler.py`，实现关键词触发 → 列表回复 → 序号交互；
-- [ ] 在 `main.py` 中注册消息 Handler；
-- [ ] 集成测试：在 QQ 群发送"五维消息"，验证列表回复和序号交互；
-- [ ] Git 提交。
+- [x] 编写 `access_control.py`，实现白名单/黑名单逻辑；
+- [x] 编写 `query_handler.py`，实现关键词触发 → 列表回复 → 序号交互；
+- [x] 在 `main.py` 中注册消息 Handler；
+- [ ] 集成测试：在 QQ 群发送"五维消息"，验证列表回复和序号交互（需 AstrBot + NapCat 环境）；
+- [x] Git 提交。
 
 ### Phase 4: 配置完善 + 部署文档
 - [ ] 完善 `_conf_schema.json`，确保所有配置项在 WebUI 可见可编辑；
