@@ -142,24 +142,29 @@ class OnePercentNewsPlugin(Star):
         # 序号交互（纯数字）
         if message.isdigit():
             index = int(message)
-            handled = await self.query_handler.handle_index_reply(
+            handled, reply_text = self.query_handler.handle_index_reply(
                 user_id=user_id,
                 session_id=session_id,
                 index=index,
-                event=event,
             )
             if handled:
+                if reply_text:
+                    yield event.plain_result(reply_text)
                 event.stop_event()
             return
 
         # 关键词触发
-        keywords = self.config.get("trigger_keywords", ["五维消息", "百分之一消息", "五维通知", "百分之一通知"])
+        keywords = self.config.get(
+            "trigger_keywords",
+            ["五维消息", "百分之一消息", "五维通知", "百分之一通知"],
+        )
         if message in keywords:
-            handled = await self.query_handler.handle_keyword_trigger(
+            handled, reply_text = self.query_handler.handle_keyword_trigger(
                 user_id=user_id,
                 session_id=session_id,
                 group_id=group_id,
-                event=event,
             )
             if handled:
+                if reply_text:
+                    yield event.plain_result(reply_text)
                 event.stop_event()

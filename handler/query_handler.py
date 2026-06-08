@@ -11,7 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 class QueryHandler:
-    """处理关键词触发和序号交互的查询请求"""
+    """处理关键词触发和序号交互的查询请求。
+
+    所有 handle_* 方法返回 (handled: bool, reply_text: str | None)，
+    由 main.py 统一通过 yield event.plain_result() 发送消息。
+    """
 
     def __init__(
         self,
@@ -27,31 +31,30 @@ class QueryHandler:
         # 等待序号输入的用户状态: {session_id: (user_id, timestamp)}
         self._pending_users: dict[str, tuple[str, float]] = {}
 
-    async def handle_keyword_trigger(
+    def handle_keyword_trigger(
         self,
         user_id: str,
         session_id: str,
         group_id: str,
-        event: Any,
-    ) -> bool:
-        """处理关键词触发：回复最近消息列表。
+    ) -> tuple[bool, str | None]:
+        """处理关键词触发：返回最近消息列表文本。
 
         Returns:
-            True 表示消息已被插件处理（应阻止 LLM），False 表示未处理。
+            (True, reply_text) — 已处理，文本待发送
+            (False, None) — 权限不足未处理
         """
         # 权限检查
         if group_id:
             if not self.access_control.check_group(group_id):
-                return False
+                return False, None
         else:
             if not self.access_control.check_private(user_id):
-                return False
+                return False, None
 
         # 获取最近消息
         posts = self.cache.get_recent_posts(self.list_count)
         if not posts:
-            await self._reply(event, "暂无消息，请稍后再试。")
-            return True
+            return True, "暂无消息，请稍后再试。"
 
         # 构建列表回复
         lines = ["【百分之一 · 最近消息】", ""]
@@ -64,39 +67,38 @@ class QueryHandler:
         # 记录等待状态
         self._pending_users[session_id] = (user_id, time.time())
 
-        await self._reply(event, "\n".join(lines))
-        return True
+        return True, "\n".join(lines)
 
-    async def handle_index_reply(
+    def handle_index_reply(
         self,
         user_id: str,
         session_id: str,
         index: int,
-        event: Any,
-    ) -> bool:
-        """处理序号回复：回复单条消息详情。
+    ) -> tuple[bool, str | None]:
+        """处理序号回复：返回单条消息详情文本。
 
         Returns:
-            True 表示消息已被插件处理（应阻止 LLM），False 表示未匹配。
+            (True, reply_text) — 序号在交互中，文本待发送
+            (False, None) — 不在交互中，让 LLM 处理
         """
         # 检查是否在等待状态
         pending = self._pending_users.get(session_id)
         if pending is None:
-            return False
+            return False, None
 
         pending_user_id, timestamp = pending
         if pending_user_id != user_id:
-            return False
+            return False, None
 
         # 检查超时
         if time.time() - timestamp > self.interaction_timeout:
             del self._pending_users[session_id]
-            return False
+            return False, None
 
         # 获取消息详情
         post = self.cache.get_post_by_index(index, self.list_count)
         if post is None:
-            return True  # 序号无效但确实在交互中，阻止 LLM
+            return True, None  # 序号无效但确实在交互中，阻止 LLM
 
         # 构建详情回复
         lines = [
@@ -121,15 +123,4 @@ class QueryHandler:
         # 清除等待状态
         del self._pending_users[session_id]
 
-        await self._reply(event, "\n".join(lines))
-        return True
-
-    async def _reply(self, event: Any, message: str):
-        """发送回复消息"""
-        try:
-            if hasattr(event, "reply"):
-                await event.reply(message)
-            elif hasattr(event, "send"):
-                await event.send(message)
-        except Exception as e:
-            logger.error(f"回复消息失败: {e}")
+        return True, "\n".join(lines)
