@@ -38,13 +38,15 @@ cp -r astrbot_plugin_onepercent_news /path/to/astrbot/addons/
 依赖会在 AstrBot 加载插件时自动安装，或手动安装：
 
 ```bash
-pip install httpx beautifulsoup4 lxml
+pip install -r requirements.txt
+# 或使用 uv：
+uv sync
 ```
 
-使用 uv：
+**注意**：Playwright 首次使用需要安装 Chromium 浏览器：
 
 ```bash
-uv sync
+playwright install chromium
 ```
 
 ### 配置
