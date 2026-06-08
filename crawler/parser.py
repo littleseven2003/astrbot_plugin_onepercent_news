@@ -256,22 +256,32 @@ class PostParser:
         )
 
     def _extract_images(self, item: dict) -> list[str]:
-        """从 item 中提取图片 URL 列表"""
+        """从 item 中提取图片 URL 列表（优先取 original_url 获取原图）"""
         images = []
 
-        # TapTap topic.footer_images.images 结构
+        # 主路径：topic.images[]（TapTap feed/v7 结构）
         topic = item.get("topic") or {}
         if isinstance(topic, dict):
-            footer = topic.get("footer_images") or {}
-            if isinstance(footer, dict):
-                img_list = footer.get("images") or []
-                if isinstance(img_list, list):
-                    for img in img_list:
-                        url = self._extract_img_url(img)
-                        if url:
-                            images.append(url)
+            img_list = topic.get("images") or []
+            if isinstance(img_list, list):
+                for img in img_list:
+                    url = self._extract_img_url(img)
+                    if url:
+                        images.append(url)
 
-        # 直接 images 字段
+        # 兜底路径 1：footer_images.images
+        if not images:
+            if isinstance(topic, dict):
+                footer = topic.get("footer_images") or {}
+                if isinstance(footer, dict):
+                    img_list = footer.get("images") or []
+                    if isinstance(img_list, list):
+                        for img in img_list:
+                            url = self._extract_img_url(img)
+                            if url:
+                                images.append(url)
+
+        # 兜底路径 2：moment 自身的 images
         img_list = item.get("images") or []
         if isinstance(img_list, list):
             for img in img_list:
@@ -289,12 +299,20 @@ class PostParser:
                     if url and url not in images:
                         images.append(url)
 
-        # cover (封面图)
-        cover = item.get("cover") or item.get("cover_image") or ""
-        if isinstance(cover, str) and cover:
-            images.append(cover)
-        elif isinstance(cover, dict):
-            url = self._extract_img_url(cover)
+        # sharing.image（分享卡片图片，作为最后补充）
+        sharing = item.get("sharing") or {}
+        if isinstance(sharing, dict):
+            share_img = sharing.get("image")
+            if share_img:
+                url = self._extract_img_url(share_img)
+                if url and url not in images:
+                    images.append(url)
+
+        # cover（封面图，最低优先级）
+        cover = item.get("cover") or {}
+        if isinstance(cover, dict):
+            cover_img = cover.get("image") or {}
+            url = self._extract_img_url(cover_img)
             if url and url not in images:
                 images.append(url)
 
@@ -302,14 +320,15 @@ class PostParser:
 
     @staticmethod
     def _extract_img_url(img: Any) -> str:
-        """从各种格式中提取图片 URL"""
+        """从各种格式中提取图片 URL，优先取原图（original_url）"""
         if isinstance(img, str):
             return img
         if isinstance(img, dict):
             return (
-                img.get("url")
+                img.get("original_url")
+                or img.get("url")
+                or img.get("large_url")
                 or img.get("src")
-                or img.get("original_url")
                 or img.get("original")
                 or img.get("origin_img")
                 or ""

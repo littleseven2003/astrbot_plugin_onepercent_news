@@ -1,5 +1,28 @@
 # 更新日志
 
+## v0.2.0 - 2026-06-09
+
+### 新增
+
+- **图片推送**：自动推送时附带帖子中的图片（aiocqhttp / NapCat）
+- **图片查询**：序号交互查看详情时，发送帖内图片
+- **图片数标识**：关键词触发列表显示每条消息的图片数量 `(N图)`
+
+### 修复
+
+- **图片提取路径错误**：`topic.images` 而非 `topic.footer_images.images`
+  - 同时补充 `sharing.image`、`cover.image` 等兜底路径
+  - 图片 URL 优先取 `original_url`（原图）
+
+### 调整
+
+- `query_handler` 接口变更：`handle_index_reply` 返回 `(bool, str, list[str])`
+- `push_handler` 推送逻辑重写，支持构造 `MessageChain` 发送图文消息
+- `main.py` 序号交互时 `yield event.image_result(img_url)` 发送图片
+- 版本号更新到 0.2.0
+
+---
+
 ## v0.1.6 - 2026-06-09
 
 ### 修复

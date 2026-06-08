@@ -9,6 +9,7 @@ from pathlib import Path
 
 from astrbot.api import logger  # 使用 AstrBot 内置 logger，确保日志可见
 from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.message_components import Image
 from astrbot.api.star import Star, Context
 
 from .crawler.taptap_client import TapTapClient
@@ -167,12 +168,14 @@ class OnePercentNewsPlugin(Star):
         # 序号交互（纯数字）
         if message.isdigit():
             index = int(message)
-            handled, reply_text = self.query_handler.handle_index_reply(
+            handled, reply_text, image_urls = self.query_handler.handle_index_reply(
                 user_id=user_id, session_id=session_id, index=index,
             )
             if handled:
                 if reply_text:
                     yield event.plain_result(reply_text)
+                for img_url in image_urls:
+                    yield event.image_result(img_url)
                 event.stop_event()
             return
 
