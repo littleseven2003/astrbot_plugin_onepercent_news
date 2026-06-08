@@ -8,6 +8,7 @@ import asyncio
 import logging
 from pathlib import Path
 
+from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Star, Context
 
 from .crawler.taptap_client import TapTapClient
@@ -121,7 +122,8 @@ class OnePercentNewsPlugin(Star):
 
     # ------- 消息 Handler -------
 
-    async def on_message(self, event):
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def on_message(self, event: AstrMessageEvent):
         """处理所有消息事件"""
         if not self._running:
             return
