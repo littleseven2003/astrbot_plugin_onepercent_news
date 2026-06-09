@@ -74,7 +74,6 @@ class PushHandler:
 
         if hasattr(self.context, "send_message"):
             try:
-                # 方式一：unified_msg_origin 格式 session
                 session_str = (
                     f"aiocqhttp:group:{group_id}" if group_id
                     else f"aiocqhttp:friend:{user_id}"
@@ -82,14 +81,13 @@ class PushHandler:
                 await self.context.send_message(session_str, chain)
                 return
             except Exception as e:
-                logger.debug(f"send_message(unified) 失败: {e}")
+                logger.warning(f"send_message(unified) 失败: {e}")
 
             try:
-                # 方式二：直接用 target_id（向后兼容）
                 await self.context.send_message(target_id, chain)
                 return
             except Exception as e:
-                logger.debug(f"send_message(raw) 失败: {e}")
+                logger.warning(f"send_message(raw) 失败: {e}")
 
         # 方式三：平台适配器
         adapter = self._get_adapter()
