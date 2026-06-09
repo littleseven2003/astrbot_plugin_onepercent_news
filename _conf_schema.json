@@ -70,9 +70,9 @@
     "type": "int",
     "default": 60
   },
-  "clear_history": {
-    "description": "发送 /清除百分之一消息缓存 命令即可清空全部缓存数据并重新爬取最新消息",
-    "type": "text",
-    "default": "发送 /清除百分之一消息缓存 清空缓存"
+  "admin_qq": {
+    "description": "管理员 QQ 号列表（只有在这里的 QQ 号可以使用 /清除百分之一消息缓存 命令，一行一个）",
+    "type": "list",
+    "default": []
   }
 }

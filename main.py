@@ -78,7 +78,7 @@ class OnePercentNewsPlugin(Star):
                 f"🗑️ 已自动清理 {deleted} 条旧缓存，将在首次交互时重新爬取"
             )
 
-        logger.info("百分之一消息推送插件已加载（v0.3.10），等待首次交互触发爬取")
+        logger.info("百分之一消息推送插件已加载（v0.4.0），等待首次交互触发爬取")
 
     # ---- 生命周期 ----
 
@@ -218,14 +218,20 @@ class OnePercentNewsPlugin(Star):
 
     @filter.command("清除百分之一消息缓存")
     async def clear_history(self, event: AstrMessageEvent):
-        """清空所有缓存数据并重置爬取状态"""
+        """清空所有缓存数据并重置爬取状态（仅管理员可用）"""
+        user_id = str(event.get_sender_id()) if hasattr(event, "get_sender_id") else ""
+        admin_list = set(str(a).strip() for a in self.config.get("admin_qq", []))
+        if admin_list and user_id not in admin_list:
+            logger.warning(f"🚫 非管理员 {user_id} 尝试清除缓存（admin_qq={admin_list}）")
+            yield event.plain_result("❌ 权限不足，只有管理员才能执行此操作。")
+            return
+
         deleted = self.cache.clear_all()
-        self._initial_crawl_done = False  # 重置，允许下次查询重爬
+        self._initial_crawl_done = False
         if deleted > 0:
-            logger.info(f"🗑️ 用户 {event.get_sender_name()} 触发了清除缓存，删除了 {deleted} 条记录，已重置爬取状态")
+            logger.info(f"🗑️ 管理员 {event.get_sender_name()} 清除缓存，删除了 {deleted} 条记录")
             yield event.plain_result(f"✅ 已清空 {deleted} 条缓存，下次查询时将重新爬取最新数据。")
         else:
-            logger.info(f"🗑️ 用户 {event.get_sender_name()} 触发清除缓存，但缓存为空")
             yield event.plain_result("缓存为空，无需清理。")
 
     # ------- 消息 Handler -------
