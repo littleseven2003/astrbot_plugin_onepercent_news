@@ -1,5 +1,27 @@
 # 更新日志
 
+## v0.4.1 - 2026-06-09
+
+### 重构
+
+- **群聊/私聊独立黑白名单**：
+  - 新增 `group_access_mode` + `group_blacklist` / `group_whitelist`
+  - 新增 `private_access_mode` + `private_blacklist` / `private_whitelist`
+  - 删除旧 `access_mode`、`group_list`、`private_list`
+- **自动推送一体化**：
+  - 删除 `push_groups`、`push_privates` 配置项
+  - 白名单模式下：自动推送到白名单中的所有群/用户
+  - 黑名单模式下：无法枚举全部目标，自动推送不生效（请使用白名单模式）
+
+### 逻辑规则
+
+| 模式 | 名单为空 | 名单不为空 |
+|---|---|---|
+| 黑名单 | 全部允许 | 名单内禁止，其余允许 |
+| 白名单 | 全部禁止 | 名单内允许，其余禁止 |
+
+---
+
 ## v0.4.0 - 2026-06-09
 
 ### 新增
