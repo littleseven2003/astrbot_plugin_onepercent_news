@@ -69,5 +69,10 @@
     "description": "序号交互超时（秒）",
     "type": "int",
     "default": 60
+  },
+  "clear_history": {
+    "description": "发送 /清除百分之一消息缓存 命令即可清空全部缓存数据并重新爬取最新消息",
+    "type": "text",
+    "default": "发送 /清除百分之一消息缓存 清空缓存"
   }
 }

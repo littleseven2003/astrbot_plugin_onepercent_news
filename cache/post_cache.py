@@ -131,6 +131,39 @@ class PostCache:
         except Exception as e:
             logger.error(f"清理旧数据失败: {e}")
 
+    def clear_all(self) -> int:
+        """清空所有缓存数据。
+
+        Returns:
+            被删除的行数
+        """
+        try:
+            with self._get_conn() as conn:
+                count = conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
+                conn.execute("DELETE FROM posts")
+                conn.commit()
+                logger.info(f"🗑️ 已清空全部缓存，共删除 {count} 条记录")
+                return count
+        except Exception as e:
+            logger.error(f"清空缓存失败: {e}")
+            return 0
+
+    def count_stale(self) -> int:
+        """统计 ordered_content 为空的旧数据行数。
+
+        Returns:
+            未填充 ordered_content 的记录数
+        """
+        try:
+            with self._get_conn() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM posts WHERE ordered_content IS NULL OR ordered_content = '[]'"
+                ).fetchone()
+                return row[0] if row else 0
+        except Exception as e:
+            logger.warning(f"统计旧数据失败: {e}")
+            return 0
+
     @staticmethod
     def _row_to_post(row: sqlite3.Row) -> PostItem:
         """将 SQLite Row 转换为 PostItem"""
