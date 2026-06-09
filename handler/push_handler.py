@@ -62,8 +62,8 @@ class PushHandler:
     ):
         """通过 AstrBot Context.send_message 发送纯文本。
 
-        session 格式: aiocqhttp:group:ID 或 aiocqhttp:friend:ID
-        第二个参数必须是 MessageChain。
+        session 格式: {platform_id}:GroupMessage:{session_id}
+        其中 platform_id 是 platform.meta().id（非 name）。
         """
         from astrbot.api.event import MessageChain
         from astrbot.api.message_components import Plain
@@ -72,37 +72,48 @@ class PushHandler:
         chain = MessageChain()
         chain.chain = [Plain(text=text)]
 
-        if hasattr(self.context, "send_message"):
-            try:
-                session_str = (
-                    f"aiocqhttp:GroupMessage:{group_id}" if group_id
-                    else f"aiocqhttp:FriendMessage:{user_id}"
-                )
-                await self.context.send_message(session_str, chain)
-                return
-            except Exception as e:
-                logger.warning(f"send_message 失败: {e}")
-
-        # 方式三：平台适配器
-        adapter = self._get_adapter()
-        if adapter:
-            from astrbot.core.platform.astr_message_event import MessageSesion
-
-            msg_type = "group" if group_id else "private"
-            session = MessageSesion(
-                session_id=target_id, message_type=msg_type,
-            )
-            await adapter.send_by_session(session, chain)
+        platform_id = self._get_platform_id()
+        if not platform_id:
+            logger.warning(f"无法获取平台 ID，无法发送消息到 {target_id}")
             return
 
-        logger.warning(f"无法发送消息到 {target_id}（无可用发送方式）")
+        session_str = (
+            f"{platform_id}:GroupMessage:{group_id}" if group_id
+            else f"{platform_id}:FriendMessage:{user_id}"
+        )
 
-    def _get_adapter(self):
+        if hasattr(self.context, "send_message"):
+            try:
+                ok = await self.context.send_message(session_str, chain)
+                if ok:
+                    return
+                logger.warning(f"send_message 返回 False: {session_str}")
+            except Exception as e:
+                logger.warning(f"send_message 异常: {e}")
+
+        # 兜底：直接通过平台适配器发送
         try:
-            if hasattr(self.context, "platform"):
-                return self.context.platform
-            if hasattr(self.context, "get_platform_adapter"):
-                return self.context.get_platform_adapter()
-        except Exception:
-            pass
-        return None
+            pm = self.context.platform_manager
+            for platform in pm.platform_insts:
+                if platform.meta().id == platform_id:
+                    from astrbot.core.platform.astr_message_event import MessageSesion
+                    msg_type = "group" if group_id else "private"
+                    session = MessageSesion(
+                        session_id=target_id, message_type=msg_type,
+                    )
+                    await platform.send_by_session(session, chain)
+                    return
+        except Exception as e:
+            logger.warning(f"平台适配器兜底发送失败: {e}")
+
+        logger.warning(f"无法发送消息到 {target_id}")
+
+    def _get_platform_id(self) -> str:
+        """获取当前注册的第一个平台适配器的 meta().id"""
+        try:
+            pm = self.context.platform_manager
+            if pm.platform_insts:
+                return pm.platform_insts[0].meta().id
+        except Exception as e:
+            logger.warning(f"获取 platform_id 失败: {e}")
+        return ""
