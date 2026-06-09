@@ -75,19 +75,13 @@ class PushHandler:
         if hasattr(self.context, "send_message"):
             try:
                 session_str = (
-                    f"aiocqhttp:group:{group_id}" if group_id
-                    else f"aiocqhttp:friend:{user_id}"
+                    f"aiocqhttp:GroupMessage:{group_id}" if group_id
+                    else f"aiocqhttp:FriendMessage:{user_id}"
                 )
                 await self.context.send_message(session_str, chain)
                 return
             except Exception as e:
-                logger.warning(f"send_message(unified) 失败: {e}")
-
-            try:
-                await self.context.send_message(target_id, chain)
-                return
-            except Exception as e:
-                logger.warning(f"send_message(raw) 失败: {e}")
+                logger.warning(f"send_message 失败: {e}")
 
         # 方式三：平台适配器
         adapter = self._get_adapter()
