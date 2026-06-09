@@ -1,5 +1,5 @@
 name: astrbot_plugin_onepercent_news
 author: littleseven2003
-version: "0.3.5"
+version: "0.3.4"
 description: 百分之一消息推送插件 - 自动同步 TapTap 官方消息到 QQ 群聊/私聊
 repo: https://github.com/littleseven2003/astrbot_plugin_onepercent_news
