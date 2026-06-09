@@ -159,6 +159,7 @@ class OnePercentNewsPlugin(Star):
         """调用帖子详情 API → 解析 HTML 原文 → 填充 ordered_content"""
         from .crawler.parser import PostParser
 
+        # 策略一：详情 API 获取完整 HTML 原文
         if post.topic_id:
             detail = await self.tap_client.fetch_post_detail(post.topic_id)
             if detail:
@@ -167,18 +168,23 @@ class OnePercentNewsPlugin(Star):
                 html_text = contents.get("text", "")
                 if html_text:
                     post.ordered_content = PostParser.parse_ordered_content(html_text)
-                    logger.info(f"  📝 帖子 {post.title[:20]}... ordered_content: {len(post.ordered_content)} 段")
+                    logger.info(
+                        f"  📝 帖子 {post.title[:20]}... "
+                        f"ordered_content: {len(post.ordered_content)} 段"
+                    )
                     return
 
-        # fallback: summary + images
+        # 策略二：fallback → 用 summary（同样是 HTML，含 <img> 标签）
+        if post.summary:
+            post.ordered_content = PostParser.parse_ordered_content(post.summary)
+            return
+
+        # 策略三：最后兜底 → 纯文本 + 所有图片
         ordered = []
         if post.summary:
-            for line in post.summary.split("\n"):
-                stripped = line.strip()
-                if stripped:
-                    ordered.append({"type": "text", "text": stripped})
-        for img in post.images:
-            ordered.append({"type": "image", "url": img})
+            ordered.append({"type": "text", "text": post.summary})
+        for img_url in post.images:
+            ordered.append({"type": "image", "url": img_url})
         post.ordered_content = ordered
 
     # ------- 消息 Handler -------
