@@ -66,17 +66,14 @@ class PushHandler:
         try:
             # 方式一：context.send_message（aiocqhttp 标准 API）
             if hasattr(self.context, "send_message"):
-                # 合并文本和图片为一条 MessageChain 发送
                 from astrbot.api.event import MessageChain
                 from astrbot.api.message_components import Plain, Image
                 chain = MessageChain()
-                chain.chain = [Plain(text=text)] + [
-                    Image(u) for u in images
-                ]
+                chain.chain = [Plain(text=text)] + [Image(u) for u in images]
                 await self.context.send_message(msg_type, target_id, chain)
                 return
         except Exception as e:
-            logger.warning(f"context.send_message 失败，尝试 MessageChain: {e}")
+            logger.warning(f"context.send_message 失败: {e}")
 
         # 方式二：平台适配器 send_by_session（一条 MessageChain）
         try:

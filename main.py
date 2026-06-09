@@ -8,7 +8,7 @@ import asyncio
 from pathlib import Path
 
 from astrbot.api import logger  # 使用 AstrBot 内置 logger，确保日志可见
-from astrbot.api.event import MessageChain, filter, AstrMessageEvent
+from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.message_components import Plain, Image
 from astrbot.api.star import Star, Context
 
@@ -65,7 +65,7 @@ class OnePercentNewsPlugin(Star):
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._running = True
-        logger.info("百分之一消息推送插件已加载（v0.2.5），等待首次交互触发爬取")
+        logger.info("百分之一消息推送插件已加载（v0.2.6），等待首次交互触发爬取")
 
     # ---- 生命周期 ----
 
@@ -173,11 +173,10 @@ class OnePercentNewsPlugin(Star):
             )
             if handled:
                 if reply_text:
-                    chain = MessageChain()
-                    chain.chain = [Plain(text=reply_text)] + [
-                        Image(img_url) for img_url in image_urls
-                    ]
-                    yield chain
+                    yield event.chain_result(
+                        [Plain(text=reply_text)]
+                        + [Image(img_url) for img_url in image_urls]
+                    )
                 event.stop_event()
             return
 

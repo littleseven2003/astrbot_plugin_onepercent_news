@@ -1,5 +1,16 @@
 # 更新日志
 
+## v0.2.6 - 2026-06-09
+
+### 修复
+
+- **图文合并为一条消息**：改用 AstrBot 官方 `event.chain_result([Plain, Image, ...])` API
+  - 之前用 `yield MessageChain()` 裸对象，框架管道不识别，消息被丢弃
+  - `chain_result()` 是 `AstrMessageEvent` 官方方法，返回 `MessageEventResult`，框架正确解析
+  - 图文按序在同一消息中展示
+
+---
+
 ## v0.2.5 - 2026-06-09
 
 ### 修复
