@@ -23,7 +23,7 @@ class PushHandler:
         if not push_groups and not push_privates:
             return
 
-        text = self._format_push_list(posts)
+        text = self._format_push_list(posts, config)
 
         for group_id in push_groups:
             if self.access_control.check_group(group_id):
@@ -46,13 +46,20 @@ class PushHandler:
                     logger.error(f"推送用户 {user_id} 失败: {e}")
 
     @staticmethod
-    def _format_push_list(posts: list[PostItem]) -> str:
+    def _format_push_list(posts: list[PostItem], config: dict) -> str:
         lines = ["【百分之一 · 新消息】", ""]
         for i, post in enumerate(posts, 1):
             img_tag = f" ({len(post.images)}图)" if post.images else ""
             lines.append(f"🆕 {i}. {post.title}{img_tag}")
+
         lines.append("")
-        lines.append("发送 五维消息 查看完整列表与详情")
+        # 从配置中读取触发关键词，展示为 "发送 XX/XX/XX 查看完整列表与详情"
+        keywords = config.get(
+            "trigger_keywords",
+            ["五维消息", "百分之一消息", "五维通知", "百分之一通知"],
+        )
+        kw_display = " / ".join(keywords)
+        lines.append(f"发送 {kw_display} 查看完整列表与详情")
         return "\n".join(lines)
 
     # ---------- sending ----------
