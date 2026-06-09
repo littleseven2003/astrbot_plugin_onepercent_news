@@ -132,6 +132,7 @@ class OnePercentNewsPlugin(Star):
             # 对新增帖子，获取详情并填充 ordered_content
             for post in new_posts:
                 await self._enrich_ordered_content(post)
+                await asyncio.sleep(0.5)  # 避免详情 API 限流
 
             for post in new_posts:
                 self.cache.mark_pushed(post)
@@ -168,15 +169,24 @@ class OnePercentNewsPlugin(Star):
                 html_text = contents.get("text", "")
                 if html_text:
                     post.ordered_content = PostParser.parse_ordered_content(html_text)
+                    texts = sum(1 for s in post.ordered_content if s["type"] == "text")
+                    imgs = sum(1 for s in post.ordered_content if s["type"] == "image")
                     logger.info(
-                        f"  📝 帖子 {post.title[:20]}... "
-                        f"ordered_content: {len(post.ordered_content)} 段"
+                        f"  📝 {post.title[:20]}... "
+                        f"详情API: {len(post.ordered_content)} 段 ({texts}文{imgs}图)"
                     )
                     return
+            logger.debug(f"  ⚠️ {post.title[:20]}... 详情API无数据，尝试 summary fallback")
 
         # 策略二：fallback → 用 summary（同样是 HTML，含 <img> 标签）
         if post.summary:
             post.ordered_content = PostParser.parse_ordered_content(post.summary)
+            texts = sum(1 for s in post.ordered_content if s["type"] == "text")
+            imgs = sum(1 for s in post.ordered_content if s["type"] == "image")
+            logger.warning(
+                f"  ⚠️ {post.title[:20]}... summary fallback: "
+                f"{len(post.ordered_content)} 段 ({texts}文{imgs}图)"
+            )
             return
 
         # 策略三：最后兜底 → 纯文本 + 所有图片
@@ -186,6 +196,10 @@ class OnePercentNewsPlugin(Star):
         for img_url in post.images:
             ordered.append({"type": "image", "url": img_url})
         post.ordered_content = ordered
+        logger.warning(
+            f"  ❌ {post.title[:20]}... 最终兜底: "
+            f"images 全部追加到末尾 (共 {len(post.images)} 张)"
+        )
 
     # ------- 消息 Handler -------
 

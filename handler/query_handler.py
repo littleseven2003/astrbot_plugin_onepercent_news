@@ -83,5 +83,11 @@ class QueryHandler:
         if post.url:
             header += f"\n原帖链接: {post.url}"
 
+        # 有序内容：优先用 ordered_content，为空则用 images 兜底
+        ordered = list(post.ordered_content)
+        if not ordered and post.images:
+            for img_url in post.images:
+                ordered.append({"type": "image", "url": img_url})
+
         del self._pending_users[session_id]
-        return True, header, list(post.ordered_content)
+        return True, header, ordered
