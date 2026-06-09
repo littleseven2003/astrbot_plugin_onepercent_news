@@ -71,7 +71,7 @@ class PushHandler:
                 from astrbot.api.message_components import Plain, Image
                 chain = MessageChain()
                 chain.chain = [Plain(text=text)] + [
-                    Image(url=u) for u in images
+                    Image(u) for u in images
                 ]
                 await self.context.send_message(msg_type, target_id, chain)
                 return
@@ -88,7 +88,7 @@ class PushHandler:
 
                 chain = MessageChain()
                 chain.chain = [Plain(text=text)] + [
-                    Image(url=u) for u in images
+                    Image(u) for u in images
                 ]
 
                 session = MessageSesion(session_id=target_id, message_type=msg_type)

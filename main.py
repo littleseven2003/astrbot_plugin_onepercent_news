@@ -65,7 +65,7 @@ class OnePercentNewsPlugin(Star):
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._running = True
-        logger.info("百分之一消息推送插件已加载（v0.2.4），等待首次交互触发爬取")
+        logger.info("百分之一消息推送插件已加载（v0.2.5），等待首次交互触发爬取")
 
     # ---- 生命周期 ----
 
@@ -175,7 +175,7 @@ class OnePercentNewsPlugin(Star):
                 if reply_text:
                     chain = MessageChain()
                     chain.chain = [Plain(text=reply_text)] + [
-                        Image(url=img_url) for img_url in image_urls
+                        Image(img_url) for img_url in image_urls
                     ]
                     yield chain
                 event.stop_event()
