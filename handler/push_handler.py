@@ -1,4 +1,4 @@
-"""消息处理模块 - 自动推送新消息（含图片）"""
+"""消息处理模块 - 自动推送新消息"""
 
 from typing import Any
 
@@ -9,94 +9,122 @@ from ..filter.access_control import AccessControl
 
 
 class PushHandler:
-    """将新消息（文本+图片）推送到配置的目标群聊/私聊。"""
+    """新消息推送：向目标发送标题列表，而不是逐帖详情。"""
 
     def __init__(self, context: Any, access_control: AccessControl):
         self.context = context
         self.access_control = access_control
 
     async def push_new_posts(self, posts: list[PostItem], config: dict):
+        """推送新消息列表到配置的目标会话。"""
         push_groups = set(str(g) for g in config.get("push_groups", []))
         push_privates = set(str(p) for p in config.get("push_privates", []))
 
         if not push_groups and not push_privates:
             return
 
-        for post in posts:
-            title_line = f"【百分之一消息】{post.title}"
-            if post.url:
-                title_line += f"\n查看详情: {post.url}"
+        text = self._format_push_list(posts, config)
 
-            for group_id in push_groups:
-                if self.access_control.check_group(group_id):
-                    try:
-                        await self._send_ordered_post(
-                            group_id=group_id, title=title_line, post=post,
-                        )
-                        logger.info(f"已推送消息到群 {group_id}: {post.title}")
-                    except Exception as e:
-                        logger.error(f"推送群 {group_id} 失败: {e}")
+        for group_id in push_groups:
+            if self.access_control.check_group(group_id):
+                try:
+                    await self._send_text(group_id=group_id, text=text)
+                    logger.info(
+                        f"已推送 {len(posts)} 条新消息标题到群 {group_id}"
+                    )
+                except Exception as e:
+                    logger.error(f"推送群 {group_id} 失败: {e}")
 
-            for user_id in push_privates:
-                if self.access_control.check_private(user_id):
-                    try:
-                        await self._send_ordered_post(
-                            user_id=user_id, title=title_line, post=post,
-                        )
-                        logger.info(f"已推送消息到用户 {user_id}: {post.title}")
-                    except Exception as e:
-                        logger.error(f"推送用户 {user_id} 失败: {e}")
+        for user_id in push_privates:
+            if self.access_control.check_private(user_id):
+                try:
+                    await self._send_text(user_id=user_id, text=text)
+                    logger.info(
+                        f"已推送 {len(posts)} 条新消息标题到用户 {user_id}"
+                    )
+                except Exception as e:
+                    logger.error(f"推送用户 {user_id} 失败: {e}")
+
+    @staticmethod
+    def _format_push_list(posts: list[PostItem], config: dict) -> str:
+        lines = ["【百分之一 · 新消息】", ""]
+        for i, post in enumerate(posts, 1):
+            img_tag = f" ({len(post.images)}图)" if post.images else ""
+            lines.append(f"🆕 {i}. {post.title}{img_tag}")
+
+        lines.append("")
+        # 从配置中读取触发关键词，展示为 "发送 XX/XX/XX 查看完整列表与详情"
+        keywords = config.get(
+            "trigger_keywords",
+            ["五维消息", "百分之一消息", "五维通知", "百分之一通知"],
+        )
+        kw_display = " / ".join(keywords)
+        lines.append(f"发送 {kw_display} 查看完整列表与详情")
+        return "\n".join(lines)
 
     # ---------- sending ----------
 
-    async def _send_ordered_post(self, group_id: str = "", user_id: str = "", title: str = "", post: PostItem = None):
-        """使用 ordered_content 按原文顺序发送图文。"""
+    async def _send_text(
+        self, group_id: str = "", user_id: str = "", text: str = ""
+    ):
+        """发送纯文本消息 — 试 send_message 再 adapter 兜底。"""
         from astrbot.api.event import MessageChain
-        from astrbot.api.message_components import Plain, Image
+        from astrbot.api.message_components import Plain
 
-        chain = MessageChain()
-        chain_parts = [Plain(text=title)]
-
-        # 优先用 ordered_content，fallback 到 images
-        if post and post.ordered_content:
-            for seg in post.ordered_content:
-                if seg.get("type") == "text":
-                    chain_parts.append(Plain(text=seg["text"]))
-                elif seg.get("type") == "image":
-                    chain_parts.append(Image(seg["url"]))
-        elif post and post.images:
-            for img_url in post.images:
-                chain_parts.append(Image(img_url))
-
-        chain.chain = chain_parts
         target_id = group_id or user_id
-        msg_type = "group" if group_id else "private"
+        chain = MessageChain()
+        chain.chain = [Plain(text=text)]
 
+        pid = self._get_platform_id()
+        if not pid:
+            logger.warning(f"[推送] 无法获取 platform_id，跳过发送")
+            return
+
+        session_str = (
+            f"{pid}:GroupMessage:{target_id}" if group_id
+            else f"{pid}:FriendMessage:{target_id}"
+        )
+
+        # 方式一：context.send_message
+        if hasattr(self.context, "send_message"):
+            try:
+                ok = await self.context.send_message(session_str, chain)
+                if ok:
+                    logger.info(f"[推送] ✅ send_message 成功: {session_str}")
+                    return
+                logger.warning(f"[推送] ❌ send_message 返回 False: {session_str}")
+            except Exception as e:
+                logger.warning(f"[推送] send_message 异常: {e}")
+
+        # 方式二：adapter 直发
         try:
-            if hasattr(self.context, "send_message"):
-                await self.context.send_message(msg_type, target_id, chain)
-                return
+            from astrbot.core.platform.astr_message_event import MessageSesion
+            from astrbot.core.platform.message_type import MessageType
+            pm = self.context.platform_manager
+            for plat in pm.platform_insts:
+                if plat.meta().id == pid:
+                    session = MessageSesion(
+                        platform_name=pid,
+                        message_type=MessageType.GROUP_MESSAGE if group_id else MessageType.FRIEND_MESSAGE,
+                        session_id=target_id,
+                    )
+                    await plat.send_by_session(session, chain)
+                    logger.info(f"[推送] ✅ adapter.send_by_session 成功: {pid}")
+                    return
         except Exception as e:
-            logger.warning(f"context.send_message 失败: {e}")
+            logger.warning(f"[推送] adapter 发送异常: {type(e).__name__}: {e}")
 
+        logger.warning(f"[推送] ❌ 所有方式均失败: {target_id}")
+
+    def _get_platform_id(self) -> str:
+        """获取 aiocqhttp 平台适配器的 meta().id"""
         try:
-            adapter = self._get_adapter()
-            if adapter:
-                from astrbot.core.platform.astr_message_event import MessageSesion
-                session = MessageSesion(session_id=target_id, message_type=msg_type)
-                await adapter.send_by_session(session, chain)
-                return
+            for plat in self.context.platform_manager.platform_insts:
+                if plat.meta().name == "aiocqhttp":
+                    pid = plat.meta().id
+                    logger.info(f"[推送] 找到 QQ 平台: id={pid}, name={plat.meta().name}")
+                    return pid
+            logger.warning("[推送] ⚠️ 未找到 aiocqhttp 平台适配器")
         except Exception as e:
-            logger.warning(f"适配器发送失败: {e}")
-
-        logger.warning(f"无法发送消息到 {msg_type}/{target_id}")
-
-    def _get_adapter(self):
-        try:
-            if hasattr(self.context, "platform"):
-                return self.context.platform
-            if hasattr(self.context, "get_platform_adapter"):
-                return self.context.get_platform_adapter()
-        except Exception:
-            pass
-        return None
+            logger.warning(f"[推送] 获取 platform_id 失败: {e}")
+        return ""
