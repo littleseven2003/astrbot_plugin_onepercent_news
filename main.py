@@ -78,7 +78,7 @@ class OnePercentNewsPlugin(Star):
                 f"🗑️ 已自动清理 {deleted} 条旧缓存，将在首次交互时重新爬取"
             )
 
-        logger.info("百分之一消息推送插件已加载（v0.4.3），即将执行首次爬取")
+        logger.info("百分之一消息推送插件已加载（v0.4.4），即将执行首次爬取")
 
         # 通过事件循环延迟调度首次爬取（保证 __init__ 返回后事件循环已就绪）
         try:
@@ -223,13 +223,21 @@ class OnePercentNewsPlugin(Star):
 
     # ------- 命令 -------
 
+    def _check_admin(self, event: AstrMessageEvent) -> bool:
+        """检查发送者是否为管理员。
+        
+        admin_qq 为空时允许所有人（兼容旧行为）。
+        """
+        admin_list = set(str(a).strip() for a in self.config.get("admin_qq", []))
+        if not admin_list:
+            return True
+        user_id = str(event.get_sender_id()) if hasattr(event, "get_sender_id") else ""
+        return user_id in admin_list
+
     @filter.command("清除百分之一消息缓存")
     async def clear_history(self, event: AstrMessageEvent):
         """清空所有缓存数据并重置爬取状态（仅管理员可用）"""
-        user_id = str(event.get_sender_id()) if hasattr(event, "get_sender_id") else ""
-        admin_list = set(str(a).strip() for a in self.config.get("admin_qq", []))
-        if admin_list and user_id not in admin_list:
-            logger.warning(f"🚫 非管理员 {user_id} 尝试清除缓存（admin_qq={admin_list}）")
+        if not self._check_admin(event):
             yield event.plain_result("❌ 权限不足，只有管理员才能执行此操作。")
             return
 
@@ -240,6 +248,25 @@ class OnePercentNewsPlugin(Star):
             yield event.plain_result(f"✅ 已清空 {deleted} 条缓存，下次查询时将重新爬取最新数据。")
         else:
             yield event.plain_result("缓存为空，无需清理。")
+
+    @filter.command("刷新百分之一消息")
+    async def refresh_news(self, event: AstrMessageEvent):
+        """立即执行一次爬取刷新缓存（仅管理员可用）"""
+        if not self._check_admin(event):
+            yield event.plain_result("❌ 权限不足，只有管理员才能执行此操作。")
+            return
+
+        yield event.plain_result("⏳ 正在刷新消息，请稍候...")
+        logger.info(f"🔄 管理员 {event.get_sender_name()} 触发手动刷新")
+        try:
+            await self._do_crawl()
+        except Exception as e:
+            logger.error(f"手动刷新失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 刷新失败: {e}")
+            return
+
+        total = len(self.cache.get_recent_posts(self.config.get("max_history", 200)))
+        yield event.plain_result(f"✅ 刷新完成，当前缓存共 {total} 条消息。发送关键词查看最新列表。")
 
     # ------- 消息 Handler -------
 
