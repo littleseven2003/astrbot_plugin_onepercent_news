@@ -65,7 +65,7 @@ class OnePercentNewsPlugin(Star):
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._running = True
-        logger.info("百分之一消息推送插件已加载（v0.2.6），等待首次交互触发爬取")
+        logger.info("百分之一消息推送插件已加载（v0.2.7），等待首次交互触发爬取")
 
     # ---- 生命周期 ----
 
@@ -128,6 +128,11 @@ class OnePercentNewsPlugin(Star):
             for post in posts:
                 if self.cache.is_new(post.post_id):
                     new_posts.append(post)
+
+            # 对新增帖子，获取详情并填充 ordered_content
+            for post in new_posts:
+                await self._enrich_ordered_content(post)
+
             for post in new_posts:
                 self.cache.mark_pushed(post)
 
@@ -150,6 +155,32 @@ class OnePercentNewsPlugin(Star):
         except Exception as e:
             logger.error(f"❌ 爬取失败: {e}", exc_info=True)
 
+    async def _enrich_ordered_content(self, post):
+        """调用帖子详情 API → 解析 HTML 原文 → 填充 ordered_content"""
+        from .crawler.parser import PostParser
+
+        if post.topic_id:
+            detail = await self.tap_client.fetch_post_detail(post.topic_id)
+            if detail:
+                fp = detail.get("first_post", {})
+                contents = fp.get("contents", {})
+                html_text = contents.get("text", "")
+                if html_text:
+                    post.ordered_content = PostParser.parse_ordered_content(html_text)
+                    logger.info(f"  📝 帖子 {post.title[:20]}... ordered_content: {len(post.ordered_content)} 段")
+                    return
+
+        # fallback: summary + images
+        ordered = []
+        if post.summary:
+            for line in post.summary.split("\n"):
+                stripped = line.strip()
+                if stripped:
+                    ordered.append({"type": "text", "text": stripped})
+        for img in post.images:
+            ordered.append({"type": "image", "url": img})
+        post.ordered_content = ordered
+
     # ------- 消息 Handler -------
 
     @filter.event_message_type(filter.EventMessageType.ALL)
@@ -168,15 +199,20 @@ class OnePercentNewsPlugin(Star):
         # 序号交互（纯数字）
         if message.isdigit():
             index = int(message)
-            handled, reply_text, image_urls = self.query_handler.handle_index_reply(
+            handled, reply_text, ordered_content = self.query_handler.handle_index_reply(
                 user_id=user_id, session_id=session_id, index=index,
             )
             if handled:
                 if reply_text:
-                    yield event.chain_result(
-                        [Plain(text=reply_text)]
-                        + [Image(img_url) for img_url in image_urls]
-                    )
+                    chain = [Plain(text=reply_text)]
+                    for seg in ordered_content:
+                        if seg.get("type") == "text":
+                            chain.append(Plain(text=seg["text"]))
+                        elif seg.get("type") == "image":
+                            chain.append(Image(seg["url"]))
+                        else:
+                            chain.append(Plain(text=str(seg)))
+                    yield event.chain_result(chain)
                 event.stop_event()
             return
 

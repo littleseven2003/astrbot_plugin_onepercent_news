@@ -2,7 +2,9 @@
 
 返回约定：
   handle_keyword_trigger → (handled: bool, reply_text: str)
-  handle_index_reply     → (handled: bool, reply_text: str, images: list[str])
+  handle_index_reply     → (handled: bool, reply_text: str,
+                             ordered_content: list[dict])
+    ordered_content 由 main.py 直接用于 event.chain_result()
 """
 
 import time
@@ -28,10 +30,6 @@ class QueryHandler:
     def handle_keyword_trigger(
         self, user_id: str, session_id: str, group_id: str,
     ) -> tuple[bool, str]:
-        """关键词触发 → 返回最近消息列表。
-
-        Returns: (handled, reply_text)
-        """
         if group_id:
             if not self.access_control.check_group(group_id):
                 return False, ""
@@ -55,14 +53,14 @@ class QueryHandler:
         self._pending_users[session_id] = (user_id, time.time())
         return True, "\n".join(lines)
 
-    # ---------- 序号交互（详情 + 图片） ----------
+    # ---------- 序号交互（详情 + 有序图文） ----------
 
     def handle_index_reply(
         self, user_id: str, session_id: str, index: int,
-    ) -> tuple[bool, str, list[str]]:
-        """序号回复 → 返回单条消息详情 + 图片列表。
+    ) -> tuple[bool, str, list[dict]]:
+        """序号回复 → 返回文字摘要 + 有序图文列表。
 
-        Returns: (handled, reply_text, image_urls)
+        Returns: (handled, header_text, ordered_content)
         """
         pending = self._pending_users.get(session_id)
         if pending is None:
@@ -78,16 +76,12 @@ class QueryHandler:
 
         post = self.cache.get_post_by_index(index, self.list_count)
         if post is None:
-            return True, "", []  # 在交互中但序号无效
+            return True, "", []
 
-        lines = [f"【{post.title}】", ""]
-        if post.summary:
-            lines.append(post.summary)
-            lines.append("")
-
-        lines.append(f"发布时间: {post.published_at}")
+        # 构建头部摘要
+        header = f"【{post.title}】\n\n发布时间: {post.published_at}"
         if post.url:
-            lines.append(f"原帖链接: {post.url}")
+            header += f"\n原帖链接: {post.url}"
 
         del self._pending_users[session_id]
-        return True, "\n".join(lines), list(post.images)
+        return True, header, list(post.ordered_content)

@@ -1,5 +1,25 @@
 # 更新日志
 
+## v0.2.7 - 2026-06-09
+
+### 新增
+
+- **图文按原文顺序混排**：
+  - 新增 `PostItem.ordered_content` 字段，存储有序段落列表
+  - 爬虫获取帖子后调用详情 API 获取 HTML 原文
+  - `parse_ordered_content()` 解析 HTML 中的 `<img>` 标签，按原文顺序提取文本段和图片
+  - `event.chain_result()` 按序构造 `[Plain(text), Image(url), Plain(text), ...]`
+  - 推送同样使用 `ordered_content` 保持图文顺序
+
+### 调整
+
+- `TapTapClient` 新增 `fetch_post_detail(topic_id)` 调用详情接口
+- `PostItem` 新增 `topic_id` 字段
+- `PostCache` SQLite 表新增 `ordered_content` 列（兼容旧表 ALTER TABLE）
+- `query_handler.handle_index_reply` 返回 `(bool, str, list[dict])` — ordered_content 替代 images
+
+---
+
 ## v0.2.6 - 2026-06-09
 
 ### 修复
