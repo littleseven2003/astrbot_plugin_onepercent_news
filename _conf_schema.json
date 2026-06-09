@@ -24,29 +24,35 @@
     "type": "int",
     "default": 2
   },
-  "access_mode": {
-    "description": "名单模式：whitelist（仅名单内可访问）或 blacklist（名单内禁止访问）",
+  "group_access_mode": {
+    "description": "群聊名单模式：blacklist（黑名单，禁止名单内的群）或 whitelist（白名单，只允许名单内的群）",
     "type": "string",
-    "options": ["whitelist", "blacklist"],
-    "default": "whitelist"
+    "options": ["blacklist", "whitelist"],
+    "default": "blacklist"
   },
-  "group_list": {
-    "description": "群聊名单（群号列表，每行一个）",
+  "group_blacklist": {
+    "description": "群聊黑名单（group_access_mode=blacklist 时生效，为空则所有群都允许；一行一个群号）",
     "type": "list",
     "default": []
   },
-  "private_list": {
-    "description": "私聊名单（QQ号列表，每行一个）",
+  "group_whitelist": {
+    "description": "群聊白名单（group_access_mode=whitelist 时生效，为空则所有群都禁止；一行一个群号）",
     "type": "list",
     "default": []
   },
-  "push_groups": {
-    "description": "自动推送目标群号列表（每行一个）",
+  "private_access_mode": {
+    "description": "私聊名单模式：blacklist（黑名单，禁止名单内的用户）或 whitelist（白名单，只允许名单内的用户）",
+    "type": "string",
+    "options": ["blacklist", "whitelist"],
+    "default": "blacklist"
+  },
+  "private_blacklist": {
+    "description": "私聊黑名单（private_access_mode=blacklist 时生效，为空则所有用户都允许；一行一个 QQ 号）",
     "type": "list",
     "default": []
   },
-  "push_privates": {
-    "description": "自动推送目标 QQ 号列表（每行一个）",
+  "private_whitelist": {
+    "description": "私聊白名单（private_access_mode=whitelist 时生效，为空则所有用户都禁止；一行一个 QQ 号）",
     "type": "list",
     "default": []
   },
@@ -70,9 +76,9 @@
     "type": "int",
     "default": 60
   },
-  "clear_history": {
-    "description": "发送 /清除百分之一消息缓存 命令即可清空全部缓存数据并重新爬取最新消息",
-    "type": "text",
-    "default": "发送 /清除百分之一消息缓存 清空缓存"
+  "admin_qq": {
+    "description": "管理员 QQ 号列表（只有在这里的 QQ 号可以使用 /清除百分之一消息缓存 命令，一行一个）",
+    "type": "list",
+    "default": []
   }
 }

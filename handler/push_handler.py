@@ -16,34 +16,32 @@ class PushHandler:
         self.access_control = access_control
 
     async def push_new_posts(self, posts: list[PostItem], config: dict):
-        """推送新消息列表到配置的目标会话。"""
-        push_groups = set(str(g) for g in config.get("push_groups", []))
-        push_privates = set(str(p) for p in config.get("push_privates", []))
+        """推送新消息列表到所有被允许的群聊/私聊。"""
+        groups, privates = self.access_control.get_push_targets()
 
-        if not push_groups and not push_privates:
+        if not groups and not privates:
+            logger.info("无推送目标（黑名单模式无法枚举全部，请使用白名单）")
             return
 
         text = self._format_push_list(posts, config)
 
-        for group_id in push_groups:
-            if self.access_control.check_group(group_id):
-                try:
-                    await self._send_text(group_id=group_id, text=text)
-                    logger.info(
-                        f"已推送 {len(posts)} 条新消息标题到群 {group_id}"
-                    )
-                except Exception as e:
-                    logger.error(f"推送群 {group_id} 失败: {e}")
+        for group_id in groups:
+            try:
+                await self._send_text(group_id=group_id, text=text)
+                logger.info(
+                    f"已推送 {len(posts)} 条新消息标题到群 {group_id}"
+                )
+            except Exception as e:
+                logger.error(f"推送群 {group_id} 失败: {e}")
 
-        for user_id in push_privates:
-            if self.access_control.check_private(user_id):
-                try:
-                    await self._send_text(user_id=user_id, text=text)
-                    logger.info(
-                        f"已推送 {len(posts)} 条新消息标题到用户 {user_id}"
-                    )
-                except Exception as e:
-                    logger.error(f"推送用户 {user_id} 失败: {e}")
+        for user_id in privates:
+            try:
+                await self._send_text(user_id=user_id, text=text)
+                logger.info(
+                    f"已推送 {len(posts)} 条新消息标题到用户 {user_id}"
+                )
+            except Exception as e:
+                logger.error(f"推送用户 {user_id} 失败: {e}")
 
     @staticmethod
     def _format_push_list(posts: list[PostItem], config: dict) -> str:

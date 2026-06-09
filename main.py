@@ -78,7 +78,14 @@ class OnePercentNewsPlugin(Star):
                 f"🗑️ 已自动清理 {deleted} 条旧缓存，将在首次交互时重新爬取"
             )
 
-        logger.info("百分之一消息推送插件已加载（v0.3.10），等待首次交互触发爬取")
+        logger.info("百分之一消息推送插件已加载（v0.4.4），即将执行首次爬取")
+
+        # 通过事件循环延迟调度首次爬取（保证 __init__ 返回后事件循环已就绪）
+        try:
+            loop = asyncio.get_event_loop()
+            loop.call_soon(lambda: asyncio.ensure_future(self._do_initial_crawl()))
+        except Exception as e:
+            logger.warning(f"事件循环调度失败，将在首次交互时触发爬取: {e}")
 
     # ---- 生命周期 ----
 
@@ -216,17 +223,50 @@ class OnePercentNewsPlugin(Star):
 
     # ------- 命令 -------
 
+    def _check_admin(self, event: AstrMessageEvent) -> bool:
+        """检查发送者是否为管理员。
+        
+        admin_qq 为空时允许所有人（兼容旧行为）。
+        """
+        admin_list = set(str(a).strip() for a in self.config.get("admin_qq", []))
+        if not admin_list:
+            return True
+        user_id = str(event.get_sender_id()) if hasattr(event, "get_sender_id") else ""
+        return user_id in admin_list
+
     @filter.command("清除百分之一消息缓存")
     async def clear_history(self, event: AstrMessageEvent):
-        """清空所有缓存数据并重置爬取状态"""
+        """清空所有缓存数据并重置爬取状态（仅管理员可用）"""
+        if not self._check_admin(event):
+            yield event.plain_result("❌ 权限不足，只有管理员才能执行此操作。")
+            return
+
         deleted = self.cache.clear_all()
-        self._initial_crawl_done = False  # 重置，允许下次查询重爬
+        self._initial_crawl_done = False
         if deleted > 0:
-            logger.info(f"🗑️ 用户 {event.get_sender_name()} 触发了清除缓存，删除了 {deleted} 条记录，已重置爬取状态")
+            logger.info(f"🗑️ 管理员 {event.get_sender_name()} 清除缓存，删除了 {deleted} 条记录")
             yield event.plain_result(f"✅ 已清空 {deleted} 条缓存，下次查询时将重新爬取最新数据。")
         else:
-            logger.info(f"🗑️ 用户 {event.get_sender_name()} 触发清除缓存，但缓存为空")
             yield event.plain_result("缓存为空，无需清理。")
+
+    @filter.command("刷新百分之一消息")
+    async def refresh_news(self, event: AstrMessageEvent):
+        """立即执行一次爬取刷新缓存（仅管理员可用）"""
+        if not self._check_admin(event):
+            yield event.plain_result("❌ 权限不足，只有管理员才能执行此操作。")
+            return
+
+        yield event.plain_result("⏳ 正在刷新消息，请稍候...")
+        logger.info(f"🔄 管理员 {event.get_sender_name()} 触发手动刷新")
+        try:
+            await self._do_crawl()
+        except Exception as e:
+            logger.error(f"手动刷新失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 刷新失败: {e}")
+            return
+
+        total = len(self.cache.get_recent_posts(self.config.get("max_history", 200)))
+        yield event.plain_result(f"✅ 刷新完成，当前缓存共 {total} 条消息。发送关键词查看最新列表。")
 
     # ------- 消息 Handler -------
 
@@ -242,6 +282,12 @@ class OnePercentNewsPlugin(Star):
         user_id = str(event.get_sender_id()) if hasattr(event, "get_sender_id") else ""
         session_id = str(event.get_session_id()) if hasattr(event, "get_session_id") else ""
         group_id = str(event.get_group_id()) if (hasattr(event, "get_group_id") and event.get_group_id()) else ""
+
+        # 记录见过的会话（用于黑名单模式下推送目标枚举）
+        if group_id:
+            self.access_control._seen_groups.add(group_id)
+        if user_id:
+            self.access_control._seen_privates.add(user_id)
 
         # 序号交互（纯数字）
         if message.isdigit():
