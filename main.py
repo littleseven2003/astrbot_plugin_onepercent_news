@@ -78,7 +78,14 @@ class OnePercentNewsPlugin(Star):
                 f"🗑️ 已自动清理 {deleted} 条旧缓存，将在首次交互时重新爬取"
             )
 
-        logger.info("百分之一消息推送插件已加载（v0.4.2），等待首次交互触发爬取")
+        logger.info("百分之一消息推送插件已加载（v0.4.3），即将执行首次爬取")
+
+        # 通过事件循环延迟调度首次爬取（保证 __init__ 返回后事件循环已就绪）
+        try:
+            loop = asyncio.get_event_loop()
+            loop.call_soon(lambda: asyncio.ensure_future(self._do_initial_crawl()))
+        except Exception as e:
+            logger.warning(f"事件循环调度失败，将在首次交互时触发爬取: {e}")
 
     # ---- 生命周期 ----
 
