@@ -60,32 +60,42 @@ class PushHandler:
     async def _send_text(
         self, group_id: str = "", user_id: str = "", text: str = ""
     ):
-        """通过平台适配器发送纯文本消息。
+        """通过 AstrBot Context.send_message 发送纯文本。
 
-        优先使用 Context.send_message（需构造 unified_msg_origin 格式），
-        失败则通过平台适配器 send_by_session。
+        session 格式: aiocqhttp:group:ID 或 aiocqhttp:friend:ID
+        第二个参数必须是 MessageChain。
         """
-        target_id = group_id or user_id
+        from astrbot.api.event import MessageChain
+        from astrbot.api.message_components import Plain
 
-        # 方式一：通过 context.send_message，需 session 格式
+        target_id = group_id or user_id
+        chain = MessageChain()
+        chain.chain = [Plain(text=text)]
+
         if hasattr(self.context, "send_message"):
             try:
-                session_str = self._build_session(group_id, user_id)
-                if session_str:
-                    await self.context.send_message(session_str, text)
-                    return
+                # 方式一：unified_msg_origin 格式 session
+                session_str = (
+                    f"aiocqhttp:group:{group_id}" if group_id
+                    else f"aiocqhttp:friend:{user_id}"
+                )
+                await self.context.send_message(session_str, chain)
+                return
             except Exception as e:
-                logger.debug(f"context.send_message 失败: {e}")
+                logger.debug(f"send_message(unified) 失败: {e}")
 
-        # 方式二：平台适配器
+            try:
+                # 方式二：直接用 target_id（向后兼容）
+                await self.context.send_message(target_id, chain)
+                return
+            except Exception as e:
+                logger.debug(f"send_message(raw) 失败: {e}")
+
+        # 方式三：平台适配器
         adapter = self._get_adapter()
         if adapter:
-            from astrbot.api.event import MessageChain
-            from astrbot.api.message_components import Plain
             from astrbot.core.platform.astr_message_event import MessageSesion
 
-            chain = MessageChain()
-            chain.chain = [Plain(text=text)]
             msg_type = "group" if group_id else "private"
             session = MessageSesion(
                 session_id=target_id, message_type=msg_type,
@@ -93,24 +103,7 @@ class PushHandler:
             await adapter.send_by_session(session, chain)
             return
 
-        logger.warning(f"无法发送消息到 {target_id}（无可用适配器）")
-
-    def _build_session(self, group_id: str, user_id: str) -> str:
-        """构造 AstrBot unified_msg_origin 格式: platform:type:session_id"""
-        meta = self._get_platform_meta()
-        if not meta:
-            return ""
-        platform_id = meta.name  # e.g. "aiocqhttp"
-        if group_id:
-            return f"{platform_id}:group:{group_id}"
-        return f"{platform_id}:friend:{user_id}"
-
-    def _get_platform_meta(self):
-        """获取平台元数据（含 name/id）"""
-        adapter = self._get_adapter()
-        if adapter and hasattr(adapter, "meta"):
-            return adapter.meta()
-        return None
+        logger.warning(f"无法发送消息到 {target_id}（无可用发送方式）")
 
     def _get_adapter(self):
         try:
