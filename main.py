@@ -9,6 +9,7 @@ from pathlib import Path
 
 from astrbot.api import logger  # 使用 AstrBot 内置 logger，确保日志可见
 from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.message_components import Plain, Image
 from astrbot.api.star import Star, Context
 
 from .crawler.taptap_client import TapTapClient
@@ -64,7 +65,20 @@ class OnePercentNewsPlugin(Star):
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._running = True
-        logger.info("百分之一消息推送插件已加载（v0.1.5），等待首次交互触发爬取")
+
+        # 检测旧版本缓存（ordered_content 为空），自动清理并重爬
+        stale_count = self.cache.count_stale()
+        if stale_count > 0:
+            logger.warning(
+                f"⚠️ 检测到 {stale_count} 条旧缓存数据（ordered_content 为空）"
+            )
+            deleted = self.cache.clear_all()
+            self._initial_crawl_done = False  # 重置，允许重爬
+            logger.info(
+                f"🗑️ 已自动清理 {deleted} 条旧缓存，将在首次交互时重新爬取"
+            )
+
+        logger.info("百分之一消息推送插件已加载（v0.2.11），等待首次交互触发爬取")
 
     # ---- 生命周期 ----
 
@@ -127,6 +141,12 @@ class OnePercentNewsPlugin(Star):
             for post in posts:
                 if self.cache.is_new(post.post_id):
                     new_posts.append(post)
+
+            # 对新增帖子，获取详情并填充 ordered_content
+            for post in new_posts:
+                await self._enrich_ordered_content(post)
+                await asyncio.sleep(0.5)  # 避免详情 API 限流
+
             for post in new_posts:
                 self.cache.mark_pushed(post)
 
@@ -149,6 +169,65 @@ class OnePercentNewsPlugin(Star):
         except Exception as e:
             logger.error(f"❌ 爬取失败: {e}", exc_info=True)
 
+    async def _enrich_ordered_content(self, post):
+        """调用帖子详情 API → 解析 HTML 原文 → 填充 ordered_content"""
+        from .crawler.parser import PostParser
+
+        # 策略一：详情 API 获取完整 HTML 原文
+        if post.topic_id:
+            detail = await self.tap_client.fetch_post_detail(post.topic_id)
+            if detail:
+                fp = detail.get("first_post", {})
+                contents = fp.get("contents", {})
+                html_text = contents.get("text", "")
+                if html_text:
+                    post.ordered_content = PostParser.parse_ordered_content(html_text)
+                    texts = sum(1 for s in post.ordered_content if s["type"] == "text")
+                    imgs = sum(1 for s in post.ordered_content if s["type"] == "image")
+                    logger.info(
+                        f"  📝 {post.title[:20]}... "
+                        f"详情API: {len(post.ordered_content)} 段 ({texts}文{imgs}图)"
+                    )
+                    return
+            logger.debug(f"  ⚠️ {post.title[:20]}... 详情API无数据，尝试 summary fallback")
+
+        # 策略二：fallback → 用 summary（同样是 HTML，含 <img> 标签）
+        if post.summary:
+            post.ordered_content = PostParser.parse_ordered_content(post.summary)
+            texts = sum(1 for s in post.ordered_content if s["type"] == "text")
+            imgs = sum(1 for s in post.ordered_content if s["type"] == "image")
+            logger.warning(
+                f"  ⚠️ {post.title[:20]}... summary fallback: "
+                f"{len(post.ordered_content)} 段 ({texts}文{imgs}图)"
+            )
+            return
+
+        # 策略三：最后兜底 → 纯文本 + 所有图片
+        ordered = []
+        if post.summary:
+            ordered.append({"type": "text", "text": post.summary})
+        for img_url in post.images:
+            ordered.append({"type": "image", "url": img_url})
+        post.ordered_content = ordered
+        logger.warning(
+            f"  ❌ {post.title[:20]}... 最终兜底: "
+            f"images 全部追加到末尾 (共 {len(post.images)} 张)"
+        )
+
+    # ------- 命令 -------
+
+    @filter.command("清除百分之一消息缓存")
+    async def clear_history(self, event: AstrMessageEvent):
+        """清空所有缓存数据并重置爬取状态"""
+        deleted = self.cache.clear_all()
+        self._initial_crawl_done = False  # 重置，允许下次查询重爬
+        if deleted > 0:
+            logger.info(f"🗑️ 用户 {event.get_sender_name()} 触发了清除缓存，删除了 {deleted} 条记录，已重置爬取状态")
+            yield event.plain_result(f"✅ 已清空 {deleted} 条缓存，下次查询时将重新爬取最新数据。")
+        else:
+            logger.info(f"🗑️ 用户 {event.get_sender_name()} 触发清除缓存，但缓存为空")
+            yield event.plain_result("缓存为空，无需清理。")
+
     # ------- 消息 Handler -------
 
     @filter.event_message_type(filter.EventMessageType.ALL)
@@ -167,12 +246,18 @@ class OnePercentNewsPlugin(Star):
         # 序号交互（纯数字）
         if message.isdigit():
             index = int(message)
-            handled, reply_text = self.query_handler.handle_index_reply(
+            handled, reply_text, ordered_content = self.query_handler.handle_index_reply(
                 user_id=user_id, session_id=session_id, index=index,
             )
             if handled:
                 if reply_text:
-                    yield event.plain_result(reply_text)
+                    chain = [Plain(text=reply_text)]
+                    for seg in ordered_content:
+                        if seg.get("type") == "text":
+                            chain.append(Plain(text=seg["text"]))
+                        elif seg.get("type") == "image":
+                            chain.append(Image(seg["url"]))
+                    yield event.chain_result(chain)
                 event.stop_event()
             return
 

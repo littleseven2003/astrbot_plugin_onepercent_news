@@ -1,5 +1,143 @@
 # 更新日志
 
+## v0.2.11 - 2026-06-09
+
+### 修复
+
+- **图文顺序错误**：`parse_ordered_content` 改用 BeautifulSoup 按 DOM 顺序遍历
+  - 正则方案存在边界 bug：多个连续 `<img>` 标签之间切分逻辑出错导致图片全堆末尾
+  - BeautifulSoup 确保文本节点和图片严格按 HTML 顺序提取
+- 删除不再使用的 `re` 导入
+
+---
+
+## v0.2.10 - 2026-06-09
+
+### 修复
+
+- **清除缓存后不重爬**：`/清除百分之一消息缓存` 执行后未重置 `_initial_crawl_done` 标志
+  - 导致 `_ensure_crawled()` 认为已完成爬取，用户发关键词直接读空缓存
+  - 清空命令中增加 `self._initial_crawl_done = False`
+
+---
+
+## v0.2.9 - 2026-06-09
+
+### 新增
+
+- **自动检测旧缓存**：插件加载时检测 `ordered_content` 为空的旧数据，自动清空并触发重爬
+- **清除缓存命令**：`/清除百分之一消息缓存` 一键清空全部历史数据，下次查询时重新爬取最新消息
+- `PostCache` 新增 `clear_all()` 和 `count_stale()` 方法
+- `_conf_schema.json` 新增 `clear_history` 配置项说明清除缓存方法
+
+---
+
+## v0.2.7 - 2026-06-09
+
+### 新增
+
+- **图文按原文顺序混排**：
+  - 新增 `PostItem.ordered_content` 字段，存储有序段落列表
+  - 爬虫获取帖子后调用详情 API 获取 HTML 原文
+  - `parse_ordered_content()` 解析 HTML 中的 `<img>` 标签，按原文顺序提取文本段和图片
+  - `event.chain_result()` 按序构造 `[Plain(text), Image(url), Plain(text), ...]`
+  - 推送同样使用 `ordered_content` 保持图文顺序
+
+### 调整
+
+- `TapTapClient` 新增 `fetch_post_detail(topic_id)` 调用详情接口
+- `PostItem` 新增 `topic_id` 字段
+- `PostCache` SQLite 表新增 `ordered_content` 列（兼容旧表 ALTER TABLE）
+- `query_handler.handle_index_reply` 返回 `(bool, str, list[dict])` — ordered_content 替代 images
+
+---
+
+## v0.2.6 - 2026-06-09
+
+### 修复
+
+- **图文合并为一条消息**：改用 AstrBot 官方 `event.chain_result([Plain, Image, ...])` API
+  - 之前用 `yield MessageChain()` 裸对象，框架管道不识别，消息被丢弃
+  - `chain_result()` 是 `AstrMessageEvent` 官方方法，返回 `MessageEventResult`，框架正确解析
+  - 图文按序在同一消息中展示
+
+---
+
+## v0.2.5 - 2026-06-09
+
+### 修复
+
+- **`Image(url=...)` 报错**：`Image.__init__()` 的 `file` 是位置参数，不是 `url=` 关键字
+  - 改为 `Image(img_url)` 位置传参
+  - push_handler 同步修复
+
+---
+
+## v0.2.4 - 2026-06-09
+
+### 修复
+
+- **图文分散为多条消息且顺序错误**：多 `yield` 导致框架每次发送独立消息
+  - 改为构造单一 `MessageChain`：`[Plain(text), Image(url=url1), Image(url=url2), ...]`
+  - 一次 `yield chain` → 框架收到完整图文链 → aiocqhttp 适配器一次发送
+  - `Image(url=...)` 替代 `Image(file=...)` 以确保 HTTP URL 被正确解析
+
+---
+
+## v0.2.3 - 2026-06-09
+
+### 修复
+
+- **图片未渲染，显示为链接文本**：`plain_result` 不会解析 `[CQ:image]` CQ 码
+  - 改用 `event.image_result(url)` 发送图片（AstrBot 标准图片 API）
+  - 文本和图片分条发送：先文字、再逐张图
+
+---
+
+## v0.2.2 - 2026-06-09
+
+### 修复
+
+- **图片发送失败**：`Image(file=http_url)` 不被 aiocqhttp/NapCat 识别
+  - 改用 `[CQ:image,file=<url>]` 嵌入文本，一条 `plain_result` 发出
+  - 图文在同一消息中按序展示
+- `push_handler` 方式二同步改为 `[CQ:image]` 嵌入式发送
+
+---
+
+## v0.2.1 - 2026-06-09
+
+### 优化
+
+- **图文合并为一条消息**：序号交互回复时，用 `MessageChain` 将文本和图片合并为单条混合消息
+  - 之前：文本和图片分别 `yield` → 多条独立消息
+  - 现在：`MessageChain([Plain(text), Image(file=url), ...])` → 一条消息
+
+---
+
+## v0.2.0 - 2026-06-09
+
+### 新增
+
+- **图片推送**：自动推送时附带帖子中的图片（aiocqhttp / NapCat）
+- **图片查询**：序号交互查看详情时，发送帖内图片
+- **图片数标识**：关键词触发列表显示每条消息的图片数量 `(N图)`
+
+### 修复
+
+- **图片提取路径错误**：`topic.images` 而非 `topic.footer_images.images`
+  - 同时补充 `sharing.image`、`cover.image` 等兜底路径
+  - 图片 URL 优先取 `original_url`（原图）
+
+### 调整
+
+- `query_handler` 接口变更：`handle_index_reply` 返回 `(bool, str, list[str])`
+- `push_handler` 推送逻辑重写，支持构造 `MessageChain` 发送图文消息
+- `main.py` 序号交互时 `yield event.image_result(img_url)` 发送图片
+- 版本号更新到 0.2.0
+
+---
+
 ## v0.1.6 - 2026-06-09
 
 ### 修复

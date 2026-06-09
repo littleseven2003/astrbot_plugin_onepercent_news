@@ -17,8 +17,14 @@ CREATE TABLE IF NOT EXISTS posts (
     published_at TEXT NOT NULL,
     images       TEXT,
     post_type    TEXT DEFAULT 'normal',
+    ordered_content TEXT DEFAULT '[]',
     created_at   TEXT DEFAULT (datetime('now','localtime'))
 );
+"""
+
+# 兼容旧表：如果 ordered_content 列不存在则添加
+ALTER_TABLE_SQL = """
+ALTER TABLE posts ADD COLUMN ordered_content TEXT DEFAULT '[]';
 """
 
 CREATE_INDEX_SQL = """
@@ -46,6 +52,11 @@ class PostCache:
             with self._get_conn() as conn:
                 conn.execute(CREATE_TABLE_SQL)
                 conn.execute(CREATE_INDEX_SQL)
+                # 兼容旧表：尝试新增 ordered_content 列
+                try:
+                    conn.execute(ALTER_TABLE_SQL)
+                except sqlite3.OperationalError:
+                    pass  # 列已存在
                 conn.commit()
         except Exception as e:
             logger.error(f"数据库初始化失败: {e}")
@@ -68,8 +79,9 @@ class PostCache:
             with self._get_conn() as conn:
                 conn.execute(
                     """INSERT OR IGNORE INTO posts
-                       (post_id, title, summary, url, published_at, images, post_type)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                       (post_id, title, summary, url, published_at,
+                        images, post_type, ordered_content)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         post.post_id,
                         post.title,
@@ -78,6 +90,7 @@ class PostCache:
                         post.published_at,
                         json.dumps(post.images, ensure_ascii=False),
                         post.post_type,
+                        json.dumps(post.ordered_content, ensure_ascii=False),
                     ),
                 )
                 conn.commit()
@@ -118,6 +131,39 @@ class PostCache:
         except Exception as e:
             logger.error(f"清理旧数据失败: {e}")
 
+    def clear_all(self) -> int:
+        """清空所有缓存数据。
+
+        Returns:
+            被删除的行数
+        """
+        try:
+            with self._get_conn() as conn:
+                count = conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
+                conn.execute("DELETE FROM posts")
+                conn.commit()
+                logger.info(f"🗑️ 已清空全部缓存，共删除 {count} 条记录")
+                return count
+        except Exception as e:
+            logger.error(f"清空缓存失败: {e}")
+            return 0
+
+    def count_stale(self) -> int:
+        """统计 ordered_content 为空的旧数据行数。
+
+        Returns:
+            未填充 ordered_content 的记录数
+        """
+        try:
+            with self._get_conn() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM posts WHERE ordered_content IS NULL OR ordered_content = '[]'"
+                ).fetchone()
+                return row[0] if row else 0
+        except Exception as e:
+            logger.warning(f"统计旧数据失败: {e}")
+            return 0
+
     @staticmethod
     def _row_to_post(row: sqlite3.Row) -> PostItem:
         """将 SQLite Row 转换为 PostItem"""
@@ -127,6 +173,12 @@ class PostCache:
         except json.JSONDecodeError:
             images = []
 
+        ordered_raw = row["ordered_content"] if "ordered_content" in row.keys() else "[]"
+        try:
+            ordered_content = json.loads(ordered_raw) if ordered_raw else []
+        except json.JSONDecodeError:
+            ordered_content = []
+
         return PostItem(
             post_id=row["post_id"],
             title=row["title"],
@@ -135,4 +187,5 @@ class PostCache:
             published_at=row["published_at"],
             post_type=row["post_type"] or "normal",
             images=images,
+            ordered_content=ordered_content,
         )

@@ -19,6 +19,7 @@ from astrbot.api import logger
 X_UA = quote("V=1&PN=WebApp&VN=0.1.0&LANG=zh_CN&PLT=PC")
 TAP_BASE = "https://www.taptap.cn"
 API_USER_FEED = "/webapiv2/feed/v7/by-user"
+API_TOPIC_DETAIL = "/webapiv2/topic/v1/detail"
 API_LIMIT = 10  # TapTap API 限制：limit 最大 10
 
 
@@ -105,3 +106,30 @@ class TapTapClient:
 
         logger.error(f"TapTap API 请求最终失败（已重试 {self.retry} 次）")
         return []
+
+    async def fetch_post_detail(self, topic_id: str) -> dict[str, Any] | None:
+        """获取帖子详情（含 HTML 原文，用于提取图文顺序）。
+
+        Returns:
+            详情 JSON 的 data 部分，或 None
+        """
+        api_url = (
+            f"{TAP_BASE}{API_TOPIC_DETAIL}"
+            f"?id={topic_id}&X-UA={X_UA}"
+        )
+        headers = {
+            "User-Agent": self.user_agent,
+            "Accept": "application/json",
+        }
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.timeout, follow_redirects=True
+            ) as client:
+                r = await client.get(api_url, headers=headers)
+                r.raise_for_status()
+                data = r.json()
+                return data.get("data")
+        except Exception as e:
+            logger.warning(f"获取帖子详情失败 (topic_id={topic_id}): {e}")
+            return None

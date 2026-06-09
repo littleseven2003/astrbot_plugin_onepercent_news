@@ -1,7 +1,13 @@
-"""消息处理模块 - 关键词触发与序号交互"""
+"""消息处理模块 - 关键词触发与序号交互
+
+返回约定：
+  handle_keyword_trigger → (handled: bool, reply_text: str)
+  handle_index_reply     → (handled: bool, reply_text: str,
+                             ordered_content: list[dict])
+    ordered_content 由 main.py 直接用于 event.chain_result()
+"""
 
 import time
-from typing import Any
 
 from astrbot.api import logger
 
@@ -10,116 +16,78 @@ from ..filter.access_control import AccessControl
 
 
 class QueryHandler:
-    """处理关键词触发和序号交互的查询请求。
+    """处理关键词触发和序号交互的查询请求。"""
 
-    所有 handle_* 方法返回 (handled: bool, reply_text: str | None)，
-    由 main.py 统一通过 yield event.plain_result() 发送消息。
-    """
-
-    def __init__(
-        self,
-        cache: PostCache,
-        access_control: AccessControl,
-        config: dict,
-    ):
+    def __init__(self, cache: PostCache, access_control: AccessControl, config: dict):
         self.cache = cache
         self.access_control = access_control
         self.list_count = config.get("list_count", 10)
         self.interaction_timeout = config.get("interaction_timeout", 60)
-
-        # 等待序号输入的用户状态: {session_id: (user_id, timestamp)}
         self._pending_users: dict[str, tuple[str, float]] = {}
 
-    def handle_keyword_trigger(
-        self,
-        user_id: str,
-        session_id: str,
-        group_id: str,
-    ) -> tuple[bool, str | None]:
-        """处理关键词触发：返回最近消息列表文本。
+    # ---------- 关键词触发（列表） ----------
 
-        Returns:
-            (True, reply_text) — 已处理，文本待发送
-            (False, None) — 权限不足未处理
-        """
-        # 权限检查
+    def handle_keyword_trigger(
+        self, user_id: str, session_id: str, group_id: str,
+    ) -> tuple[bool, str]:
         if group_id:
             if not self.access_control.check_group(group_id):
-                return False, None
+                return False, ""
         else:
             if not self.access_control.check_private(user_id):
-                return False, None
+                return False, ""
 
-        # 获取最近消息
         posts = self.cache.get_recent_posts(self.list_count)
         if not posts:
             return True, "暂无消息，请稍后再试。"
 
-        # 构建列表回复
         lines = ["【百分之一 · 最近消息】", ""]
         for i, post in enumerate(posts, 1):
-            lines.append(f"{i}. {post.title}")
+            img_tag = f" ({len(post.images)}图)" if post.images else ""
+            lines.append(f"{i}. {post.title}{img_tag}")
 
         lines.append("")
-        lines.append(f"回复数字 1-{len(posts)} 查看详情（{self.interaction_timeout}s 内有效）")
-
-        # 记录等待状态
+        lines.append(
+            f"回复数字 1-{len(posts)} 查看详情（{self.interaction_timeout}s 内有效）"
+        )
         self._pending_users[session_id] = (user_id, time.time())
-
         return True, "\n".join(lines)
 
-    def handle_index_reply(
-        self,
-        user_id: str,
-        session_id: str,
-        index: int,
-    ) -> tuple[bool, str | None]:
-        """处理序号回复：返回单条消息详情文本。
+    # ---------- 序号交互（详情 + 有序图文） ----------
 
-        Returns:
-            (True, reply_text) — 序号在交互中，文本待发送
-            (False, None) — 不在交互中，让 LLM 处理
+    def handle_index_reply(
+        self, user_id: str, session_id: str, index: int,
+    ) -> tuple[bool, str, list[dict]]:
+        """序号回复 → 返回文字摘要 + 有序图文列表。
+
+        Returns: (handled, header_text, ordered_content)
         """
-        # 检查是否在等待状态
         pending = self._pending_users.get(session_id)
         if pending is None:
-            return False, None
+            return False, "", []
 
         pending_user_id, timestamp = pending
         if pending_user_id != user_id:
-            return False, None
+            return False, "", []
 
-        # 检查超时
         if time.time() - timestamp > self.interaction_timeout:
             del self._pending_users[session_id]
-            return False, None
+            return False, "", []
 
-        # 获取消息详情
         post = self.cache.get_post_by_index(index, self.list_count)
         if post is None:
-            return True, None  # 序号无效但确实在交互中，阻止 LLM
+            return True, "", []
 
-        # 构建详情回复
-        lines = [
-            f"【{post.title}】",
-            "",
-        ]
-        if post.summary:
-            lines.append(post.summary)
-            lines.append("")
-
-        lines.append(f"发布时间: {post.published_at}")
+        # 构建头部摘要
+        header = f"【{post.title}】\n\n发布时间: {post.published_at}"
         if post.url:
-            lines.append(f"原帖链接: {post.url}")
+            header += f"\n原帖链接: {post.url}"
 
-        if post.images:
-            lines.append("")
-            lines.append(f"图片: {post.images[0]}")
-            if len(post.images) > 1:
-                for img_url in post.images[1:]:
-                    lines.append(f"  {img_url}")
+        # 有序内容：优先用 ordered_content，为空则用 images 兜底
+        ordered = list(post.ordered_content)
+        if not ordered and post.images:
+            for img_url in post.images:
+                ordered.append({"type": "image", "url": img_url})
 
-        # 清除等待状态
         del self._pending_users[session_id]
-
-        return True, "\n".join(lines)
+        return True, header, ordered
