@@ -99,12 +99,13 @@ class PushHandler:
         # 方式二：adapter 直发
         try:
             from astrbot.core.platform.astr_message_event import MessageSesion
+            from astrbot.core.platform.message_type import MessageType
             pm = self.context.platform_manager
             for plat in pm.platform_insts:
                 if plat.meta().id == pid:
                     session = MessageSesion(
                         platform_name=pid,
-                        message_type="GroupMessage" if group_id else "FriendMessage",
+                        message_type=MessageType.GROUP_MESSAGE if group_id else MessageType.FRIEND_MESSAGE,
                         session_id=target_id,
                     )
                     await plat.send_by_session(session, chain)
@@ -116,13 +117,14 @@ class PushHandler:
         logger.warning(f"[推送] ❌ 所有方式均失败: {target_id}")
 
     def _get_platform_id(self) -> str:
+        """获取 aiocqhttp 平台适配器的 meta().id"""
         try:
-            pid = self.context.platform_manager.platform_insts[0].meta().id
-            logger.info(f"[推送] platform_id={pid}")
-            return pid
+            for plat in self.context.platform_manager.platform_insts:
+                if plat.meta().name == "aiocqhttp":
+                    pid = plat.meta().id
+                    logger.info(f"[推送] 找到 QQ 平台: id={pid}, name={plat.meta().name}")
+                    return pid
+            logger.warning("[推送] ⚠️ 未找到 aiocqhttp 平台适配器")
         except Exception as e:
             logger.warning(f"[推送] 获取 platform_id 失败: {e}")
-            return ""
-        except Exception as e:
-            logger.warning(f"获取 platform_id 失败: {e}")
-            return ""
+        return ""
