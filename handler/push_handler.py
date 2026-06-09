@@ -67,30 +67,43 @@ class PushHandler:
     async def _send_text(
         self, group_id: str = "", user_id: str = "", text: str = ""
     ):
-        """通过平台适配器直接发送纯文本（绕过 send_message 字符串解析）。"""
+        """通过 AstrBot Context.send_message 发送纯文本。
+
+        session 格式: {platform_id}:GroupMessage:{qq_number}
+        """
         from astrbot.api.event import MessageChain
         from astrbot.api.message_components import Plain
-        from astrbot.core.platform.astr_message_event import MessageSesion
 
         target_id = group_id or user_id
+
+        # 获取 platform_id
+        pid = self._get_platform_id()
+        if not pid:
+            logger.warning(f"无法获取 platform_id，跳过发送到 {target_id}")
+            return
+
+        session_str = (
+            f"{pid}:GroupMessage:{target_id}" if group_id
+            else f"{pid}:FriendMessage:{target_id}"
+        )
+
         chain = MessageChain()
         chain.chain = [Plain(text=text)]
-        msg_type = "group" if group_id else "private"
 
-        try:
-            pm = self.context.platform_manager
-            for platform in pm.platform_insts:
-                session = MessageSesion(
-                    platform_name=platform.meta().id,
-                    session_id=target_id,
-                    message_type=msg_type,
-                )
-                try:
-                    await platform.send_by_session(session, chain)
+        if hasattr(self.context, "send_message"):
+            try:
+                ok = await self.context.send_message(session_str, chain)
+                if ok:
                     return
-                except Exception:
-                    continue
-        except Exception as e:
-            logger.warning(f"适配器发送失败: {e}")
+                logger.warning(f"send_message 返回 False: {session_str}")
+            except Exception as e:
+                logger.warning(f"send_message 异常: {e}")
 
         logger.warning(f"无法发送消息到 {target_id}")
+
+    def _get_platform_id(self) -> str:
+        try:
+            return self.context.platform_manager.platform_insts[0].meta().id
+        except Exception as e:
+            logger.warning(f"获取 platform_id 失败: {e}")
+            return ""
