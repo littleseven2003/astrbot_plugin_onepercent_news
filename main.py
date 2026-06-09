@@ -78,7 +78,7 @@ class OnePercentNewsPlugin(Star):
                 f"🗑️ 已自动清理 {deleted} 条旧缓存，将在首次交互时重新爬取"
             )
 
-        logger.info("百分之一消息推送插件已加载（v0.2.10），等待首次交互触发爬取")
+        logger.info("百分之一消息推送插件已加载（v0.2.11），等待首次交互触发爬取")
 
     # ---- 生命周期 ----
 
@@ -257,8 +257,6 @@ class OnePercentNewsPlugin(Star):
                             chain.append(Plain(text=seg["text"]))
                         elif seg.get("type") == "image":
                             chain.append(Image(seg["url"]))
-                        else:
-                            chain.append(Plain(text=str(seg)))
                     yield event.chain_result(chain)
                 event.stop_event()
             return

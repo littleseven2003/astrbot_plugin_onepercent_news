@@ -8,7 +8,6 @@
 """
 
 import json
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -364,82 +363,44 @@ class PostParser:
     def parse_ordered_content(html_text: str) -> list[dict]:
         """从帖子详情 HTML 原文中提取有序图文段落。
 
-        输入示例:
-          \"活动时间：06月1日<br/><img src=\"...\" data-origin-url=\"https://...png\"><br/>6月23再次优化...\"
-
-        输出:
-          [
-            {\"type\":\"text\",\"text\":\"活动时间：06月1日\"},
-            {\"type\":\"image\",\"url\":\"https://...png\"},
-            {\"type\":\"text\",\"text\":\"6月23再次优化...\"},
-          ]
-
-        去重策略: 同一 URL 的图片只保留首次出现的位置。
+        使用 BeautifulSoup 按 DOM 顺序遍历，确保图文严格交错。
         """
         if not html_text:
             return []
 
-        segments: list[dict] = []
+        soup = BeautifulSoup(html_text, "lxml")
+        body = soup.body if soup.body else soup
+
+        result: list[dict] = []
         seen_urls: set[str] = set()
 
-        # 正则匹配 <img ... src="..." data-origin-url="..." ...>
-        img_pattern = re.compile(
-            r'<img[^>]+data-origin-url="([^"]+)"[^>]*>',
-            re.IGNORECASE,
-        )
-        # 也匹配 src 作为 fallback
-        img_pattern_src = re.compile(
-            r'<img[^>]+src="([^"]+)"[^>]*>',
-            re.IGNORECASE,
-        )
+        for child in body.children:
+            if hasattr(child, "name") and child.name == "img":
+                # 提取图片 URL：优先 data-origin-url，其次 src
+                url = child.get("data-origin-url") or child.get("src") or ""
+                if not url:
+                    continue
+                if url in seen_urls:
+                    continue  # 去重
+                seen_urls.add(url)
+                result.append({"type": "image", "url": url})
+            else:
+                # 文本节点或非 img 标签
+                text = child.get_text() if hasattr(child, "get_text") else str(child)
+                text = text.strip()
+                if not text:
+                    continue
+                # 合并相邻的 text 段
+                if result and result[-1].get("type") == "text":
+                    result[-1]["text"] += "\n" + text
+                else:
+                    result.append({"type": "text", "text": text})
 
-        # 第一遍：用 data-origin-url 提取
-        def replacer(match):
-            url = match.group(1)
-            if url in seen_urls:
-                return ""  # 去重：已出现过的图片不重复
-            seen_urls.add(url)
-            segments.append({"type": "image", "url": url})
-            return "<!-- IMG_SEGMENT -->"
+        # 如果结果全空但有文本内容，作为纯文本返回
+        if not result:
+            text = soup.get_text("\n", strip=True)
+            if text:
+                result.append({"type": "text", "text": text})
 
-        # 先尝试 data-origin-url
-        text_with_placeholders = img_pattern.sub(replacer, html_text)
-
-        # 处理 <br/> 和 <br> 为换行
-        text_clean = re.sub(r'<br\s*/?>', '\n', text_with_placeholders)
-        # 移除其余 HTML 标签
-        text_clean = re.sub(r'<[^>]+>', '', text_clean)
-        # 解码 HTML entities
-        text_clean = text_clean.replace('&nbsp;', ' ').replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&').replace('&quot;', '"')
-
-        # 按 IMG_SEGMENT 占位切分
-        text_parts = text_clean.split("<!-- IMG_SEGMENT -->")
-
-        # 合并：在 segments 列表的每个 image 前插入前面匹配的文本段
-        result: list[dict] = []
-        text_idx = 0
-        for seg in segments:
-            # 把该图片之前的文本段都加上
-            while text_idx < len(text_parts):
-                part = text_parts[text_idx].strip()
-                if part:
-                    result.append({"type": "text", "text": part})
-                text_idx += 1
-                # 如果这段文本后面跟着的是图片（非末尾），跳出内层循环去加图片
-                if text_idx <= len(segments):
-                    break
-            result.append(seg)
-
-        # 剩余文本
-        while text_idx < len(text_parts):
-            part = text_parts[text_idx].strip()
-            if part:
-                result.append({"type": "text", "text": part})
-            text_idx += 1
-
-        # 如果没有任何图片，整段作为纯文本
-        if not segments:
-            if text_clean.strip():
-                result.append({"type": "text", "text": text_clean.strip()})
-
+        logger.debug(f"parse_ordered_content: {len(html_text)}B HTML → {len(result)} 段")
         return result
