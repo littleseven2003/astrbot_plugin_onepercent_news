@@ -67,19 +67,17 @@ class PushHandler:
     async def _send_text(
         self, group_id: str = "", user_id: str = "", text: str = ""
     ):
-        """通过 AstrBot Context.send_message 发送纯文本。
-
-        session 格式: {platform_id}:GroupMessage:{qq_number}
-        """
+        """发送纯文本消息 — 试 send_message 再 adapter 兜底。"""
         from astrbot.api.event import MessageChain
         from astrbot.api.message_components import Plain
 
         target_id = group_id or user_id
+        chain = MessageChain()
+        chain.chain = [Plain(text=text)]
 
-        # 获取 platform_id
         pid = self._get_platform_id()
         if not pid:
-            logger.warning(f"无法获取 platform_id，跳过发送到 {target_id}")
+            logger.warning(f"[推送] 无法获取 platform_id，跳过发送")
             return
 
         session_str = (
@@ -87,23 +85,44 @@ class PushHandler:
             else f"{pid}:FriendMessage:{target_id}"
         )
 
-        chain = MessageChain()
-        chain.chain = [Plain(text=text)]
-
+        # 方式一：context.send_message
         if hasattr(self.context, "send_message"):
             try:
                 ok = await self.context.send_message(session_str, chain)
                 if ok:
+                    logger.info(f"[推送] ✅ send_message 成功: {session_str}")
                     return
-                logger.warning(f"send_message 返回 False: {session_str}")
+                logger.warning(f"[推送] ❌ send_message 返回 False: {session_str}")
             except Exception as e:
-                logger.warning(f"send_message 异常: {e}")
+                logger.warning(f"[推送] send_message 异常: {e}")
 
-        logger.warning(f"无法发送消息到 {target_id}")
+        # 方式二：adapter 直发
+        try:
+            from astrbot.core.platform.astr_message_event import MessageSesion
+            pm = self.context.platform_manager
+            for plat in pm.platform_insts:
+                if plat.meta().id == pid:
+                    session = MessageSesion(
+                        platform_name=pid,
+                        message_type="GroupMessage" if group_id else "FriendMessage",
+                        session_id=target_id,
+                    )
+                    await plat.send_by_session(session, chain)
+                    logger.info(f"[推送] ✅ adapter.send_by_session 成功: {pid}")
+                    return
+        except Exception as e:
+            logger.warning(f"[推送] adapter 发送异常: {type(e).__name__}: {e}")
+
+        logger.warning(f"[推送] ❌ 所有方式均失败: {target_id}")
 
     def _get_platform_id(self) -> str:
         try:
-            return self.context.platform_manager.platform_insts[0].meta().id
+            pid = self.context.platform_manager.platform_insts[0].meta().id
+            logger.info(f"[推送] platform_id={pid}")
+            return pid
+        except Exception as e:
+            logger.warning(f"[推送] 获取 platform_id 失败: {e}")
+            return ""
         except Exception as e:
             logger.warning(f"获取 platform_id 失败: {e}")
             return ""
