@@ -78,7 +78,7 @@ class OnePercentNewsPlugin(Star):
                 f"🗑️ 已自动清理 {deleted} 条旧缓存，将在首次交互时重新爬取"
             )
 
-        logger.info("百分之一消息推送插件已加载（v0.4.1），等待首次交互触发爬取")
+        logger.info("百分之一消息推送插件已加载（v0.4.2），等待首次交互触发爬取")
 
     # ---- 生命周期 ----
 
@@ -248,6 +248,12 @@ class OnePercentNewsPlugin(Star):
         user_id = str(event.get_sender_id()) if hasattr(event, "get_sender_id") else ""
         session_id = str(event.get_session_id()) if hasattr(event, "get_session_id") else ""
         group_id = str(event.get_group_id()) if (hasattr(event, "get_group_id") and event.get_group_id()) else ""
+
+        # 记录见过的会话（用于黑名单模式下推送目标枚举）
+        if group_id:
+            self.access_control._seen_groups.add(group_id)
+        if user_id:
+            self.access_control._seen_privates.add(user_id)
 
         # 序号交互（纯数字）
         if message.isdigit():

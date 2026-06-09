@@ -25,6 +25,11 @@ class AccessControl:
         self._private_list = set(str(p) for p in config.get("private_blacklist" if self._private_mode == "blacklist" else "private_whitelist", []))
 
         self._config_path = access_list_path
+
+        # 记录所有见过的群/私聊（用于黑名单模式下的推送目标枚举）
+        self._seen_groups: set[str] = set()
+        self._seen_privates: set[str] = set()
+
         self._save_access_list()
 
     # ---------- 权限检查 ----------
@@ -57,16 +62,25 @@ class AccessControl:
         """获取自动推送的目标群号和 QQ 号。
 
         - 白名单模式：推送白名单中的全部条目
-        - 黑名单模式：无法枚举全部，返回空
-        - 黑名单模式 + 名单为空：无法枚举，返回空
+        - 黑名单模式：推送所有见过且未被黑名单过滤的群/用户
         """
-        groups = []
-        privates = []
+        groups: list[str] = []
+        privates: list[str] = []
 
-        if self._group_mode == "whitelist" and self._group_list:
+        if self._group_mode == "whitelist":
             groups = sorted(self._group_list)
-        if self._private_mode == "whitelist" and self._private_list:
+        else:
+            # 黑名单模式：推送所有见过的群（黑名单内的已被 check_group 过滤）
+            groups = sorted(
+                g for g in self._seen_groups if self.check_group(g)
+            )
+
+        if self._private_mode == "whitelist":
             privates = sorted(self._private_list)
+        else:
+            privates = sorted(
+                p for p in self._seen_privates if self.check_private(p)
+            )
 
         return groups, privates
 
