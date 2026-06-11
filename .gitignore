@@ -52,3 +52,6 @@ temp/
 *.key
 *.crt
 secrets/
+
+# Development notes (local only)
+DEVELOPMENT_QA.md
