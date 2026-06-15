@@ -76,6 +76,12 @@
     "type": "int",
     "default": 60
   },
+  "push_mode": {
+    "description": "新消息推送展示方式：list = 标题列表（原有形式），detail = 逐条展开详情",
+    "type": "string",
+    "options": ["list", "detail"],
+    "default": "detail"
+  },
   "admin_qq": {
     "description": "管理员 QQ 号列表（只有在这里的 QQ 号可以使用 /清除百分之一消息缓存 命令，一行一个）",
     "type": "list",

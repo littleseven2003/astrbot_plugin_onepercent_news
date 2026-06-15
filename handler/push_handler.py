@@ -9,39 +9,55 @@ from ..filter.access_control import AccessControl
 
 
 class PushHandler:
-    """新消息推送：向目标发送标题列表，而不是逐帖详情。"""
+    """新消息推送：向目标发送标题列表，或逐帖详情。"""
 
     def __init__(self, context: Any, access_control: AccessControl):
         self.context = context
         self.access_control = access_control
 
     async def push_new_posts(self, posts: list[PostItem], config: dict):
-        """推送新消息列表到所有被允许的群聊/私聊。"""
+        """推送新消息到所有被允许的群聊/私聊。"""
         groups, privates = self.access_control.get_push_targets()
 
         if not groups and not privates:
             logger.info("无推送目标（黑名单模式无法枚举全部，请使用白名单）")
             return
 
-        text = self._format_push_list(posts, config)
+        mode = config.get("push_mode", "list")
 
+        # 先发消息列表作为摘要（底部有查看详情提示）
+        list_text = self._format_push_list(posts, config)
         for group_id in groups:
             try:
-                await self._send_text(group_id=group_id, text=text)
-                logger.info(
-                    f"已推送 {len(posts)} 条新消息标题到群 {group_id}"
-                )
+                await self._send_text(group_id=group_id, text=list_text)
             except Exception as e:
-                logger.error(f"推送群 {group_id} 失败: {e}")
-
+                logger.error(f"推送群 {group_id} 列表失败: {e}")
         for user_id in privates:
             try:
-                await self._send_text(user_id=user_id, text=text)
-                logger.info(
-                    f"已推送 {len(posts)} 条新消息标题到用户 {user_id}"
-                )
+                await self._send_text(user_id=user_id, text=list_text)
             except Exception as e:
-                logger.error(f"推送用户 {user_id} 失败: {e}")
+                logger.error(f"推送用户 {user_id} 列表失败: {e}")
+
+        # 详情模式：每个帖子一条 MessageChain
+        # Plain 文字 + Image 图片按 ordered_content 顺序混排
+        if mode == "detail":
+            for post in posts:
+                chain = self._build_post_chain(post)
+                for group_id in groups:
+                    try:
+                        await self._send_chain(group_id=group_id, chain=chain)
+                    except Exception as e:
+                        logger.error(f"推送群 {group_id} 详情失败: {e}")
+                for user_id in privates:
+                    try:
+                        await self._send_chain(user_id=user_id, chain=chain)
+                    except Exception as e:
+                        logger.error(f"推送用户 {user_id} 详情失败: {e}")
+
+        logger.info(
+            f"已推送 {len(posts)} 条新消息到 {len(groups)} 个群 "
+            f"+ {len(privates)} 个用户 (mode={mode})"
+        )
 
     @staticmethod
     def _format_push_list(posts: list[PostItem], config: dict) -> str:
@@ -51,7 +67,6 @@ class PushHandler:
             lines.append(f"🆕 {i}. {post.title}{img_tag}")
 
         lines.append("")
-        # 从配置中读取触发关键词，展示为 "发送 XX/XX/XX 查看完整列表与详情"
         keywords = config.get(
             "trigger_keywords",
             ["五维消息", "百分之一消息", "五维通知", "百分之一通知"],
@@ -60,19 +75,63 @@ class PushHandler:
         lines.append(f"发送 {kw_display} 查看完整列表与详情")
         return "\n".join(lines)
 
-    # ---------- sending ----------
+    # ---------- 单帖详情链条构造 ----------
+
+    @staticmethod
+    def _build_post_chain(post: PostItem):
+        """构造与序号回复详情完全一致的 MessageChain。"""
+        from astrbot.api.event import MessageChain
+        from astrbot.api.message_components import Plain, Image
+
+        chain = MessageChain()
+        parts = []
+
+        # 头部（与 query_handler.handle_index_reply 一致）
+        header = f"【{post.title}】\n\n发布时间: {post.published_at}"
+        if post.url:
+            header += f"\n原帖链接: {post.url}"
+        parts.append(Plain(text=header))
+
+        # 有序内容
+        if post.ordered_content:
+            for seg in post.ordered_content:
+                if seg.get("type") == "text":
+                    parts.append(Plain(text=seg["text"]))
+                elif seg.get("type") == "image":
+                    parts.append(Image(seg["url"]))
+        elif post.images:
+            for img_url in post.images:
+                parts.append(Image(img_url))
+
+        chain.chain = parts
+        return chain
+
+    # ---------- 发送通道 ----------
 
     async def _send_text(
         self, group_id: str = "", user_id: str = "", text: str = ""
     ):
-        """发送纯文本消息 — 试 send_message 再 adapter 兜底。"""
+        """发送纯文本消息。"""
         from astrbot.api.event import MessageChain
         from astrbot.api.message_components import Plain
 
-        target_id = group_id or user_id
         chain = MessageChain()
         chain.chain = [Plain(text=text)]
+        await self._send_chain(group_id=group_id, user_id=user_id, chain=chain)
 
+    async def _send_chain(
+        self,
+        group_id: str = "",
+        user_id: str = "",
+        chain=None,
+    ):
+        """发送 MessageChain — 试 send_message 再 adapter 兜底。"""
+        from astrbot.api.event import MessageChain
+
+        if chain is None:
+            return
+
+        target_id = group_id or user_id
         pid = self._get_platform_id()
         if not pid:
             logger.warning(f"[推送] 无法获取 platform_id，跳过发送")
@@ -88,7 +147,6 @@ class PushHandler:
             try:
                 ok = await self.context.send_message(session_str, chain)
                 if ok:
-                    logger.info(f"[推送] ✅ send_message 成功: {session_str}")
                     return
                 logger.warning(f"[推送] ❌ send_message 返回 False: {session_str}")
             except Exception as e:
@@ -107,7 +165,6 @@ class PushHandler:
                         session_id=target_id,
                     )
                     await plat.send_by_session(session, chain)
-                    logger.info(f"[推送] ✅ adapter.send_by_session 成功: {pid}")
                     return
         except Exception as e:
             logger.warning(f"[推送] adapter 发送异常: {type(e).__name__}: {e}")
@@ -120,7 +177,6 @@ class PushHandler:
             for plat in self.context.platform_manager.platform_insts:
                 if plat.meta().name == "aiocqhttp":
                     pid = plat.meta().id
-                    logger.info(f"[推送] 找到 QQ 平台: id={pid}, name={plat.meta().name}")
                     return pid
             logger.warning("[推送] ⚠️ 未找到 aiocqhttp 平台适配器")
         except Exception as e:
