@@ -38,20 +38,43 @@ class PushHandler:
             except Exception as e:
                 logger.error(f"推送用户 {user_id} 列表失败: {e}")
 
-        # 详情模式：逐条展开
+        # 详情模式：逐条展开（文本 + 图片）
         if mode == "detail":
             for post in posts:
-                detail_text = self._format_post_detail(post)
-                for group_id in groups:
-                    try:
-                        await self._send_text(group_id=group_id, text=detail_text)
-                    except Exception as e:
-                        logger.error(f"推送群 {group_id} 详情失败: {e}")
-                for user_id in privates:
-                    try:
-                        await self._send_text(user_id=user_id, text=detail_text)
-                    except Exception as e:
-                        logger.error(f"推送用户 {user_id} 详情失败: {e}")
+                # 先发送文本详情
+                detail_text = self._format_post_detail_text(post)
+                for target_groups, target_privates, send_fn in [
+                    (groups, privates, self._send_text)
+                ]:
+                    for group_id in groups:
+                        try:
+                            await self._send_text(group_id=group_id, text=detail_text)
+                        except Exception as e:
+                            logger.error(f"推送群 {group_id} 文本失败: {e}")
+                    for user_id in privates:
+                        try:
+                            await self._send_text(user_id=user_id, text=detail_text)
+                        except Exception as e:
+                            logger.error(f"推送用户 {user_id} 文本失败: {e}")
+
+                # 发送图片（从 ordered_content 或 images 提取）
+                images = post.images
+                if post.ordered_content:
+                    images = [
+                        seg["url"] for seg in post.ordered_content
+                        if seg.get("type") == "image"
+                    ]
+                for img_url in images:
+                    for group_id in groups:
+                        try:
+                            await self._send_image(group_id=group_id, url=img_url)
+                        except Exception as e:
+                            logger.error(f"推送群 {group_id} 图片失败: {e}")
+                    for user_id in privates:
+                        try:
+                            await self._send_image(user_id=user_id, url=img_url)
+                        except Exception as e:
+                            logger.error(f"推送用户 {user_id} 图片失败: {e}")
 
         logger.info(
             f"已推送 {len(posts)} 条新消息到 {len(groups)} 个群 + {len(privates)} 个用户 "
@@ -76,8 +99,8 @@ class PushHandler:
         return "\n".join(lines)
 
     @staticmethod
-    def _format_post_detail(post: PostItem) -> str:
-        """格式化单条帖子详情文本（含有序图文）。"""
+    def _format_post_detail_text(post: PostItem) -> str:
+        """格式化单条帖子详情文本（不含图片，图片由 _send_image 发送）。"""
         lines = [f"【{post.title}】"]
         lines.append(f"发布时间: {post.published_at}")
         if post.url:
@@ -151,6 +174,49 @@ class PushHandler:
             logger.warning(f"[推送] adapter 发送异常: {type(e).__name__}: {e}")
 
         logger.warning(f"[推送] ❌ 所有方式均失败: {target_id}")
+
+    async def _send_image(
+        self, group_id: str = "", user_id: str = "", url: str = ""
+    ):
+        """发送图片消息 — 与 _send_text 相同的发送通道，但用 Image 组件。"""
+        from astrbot.api.event import MessageChain
+        from astrbot.api.message_components import Image
+
+        target_id = group_id or user_id
+        chain = MessageChain()
+        chain.chain = [Image(url)]
+
+        pid = self._get_platform_id()
+        if not pid:
+            return
+
+        session_str = (
+            f"{pid}:GroupMessage:{target_id}" if group_id
+            else f"{pid}:FriendMessage:{target_id}"
+        )
+
+        if hasattr(self.context, "send_message"):
+            try:
+                await self.context.send_message(session_str, chain)
+                return
+            except Exception:
+                pass
+
+        try:
+            from astrbot.core.platform.astr_message_event import MessageSesion
+            from astrbot.core.platform.message_type import MessageType
+            pm = self.context.platform_manager
+            for plat in pm.platform_insts:
+                if plat.meta().id == pid:
+                    session = MessageSesion(
+                        platform_name=pid,
+                        message_type=MessageType.GROUP_MESSAGE if group_id else MessageType.FRIEND_MESSAGE,
+                        session_id=target_id,
+                    )
+                    await plat.send_by_session(session, chain)
+                    return
+        except Exception:
+            pass
 
     def _get_platform_id(self) -> str:
         """获取 aiocqhttp 平台适配器的 meta().id"""
