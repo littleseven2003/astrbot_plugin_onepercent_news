@@ -1,7 +1,7 @@
 # 百分之一消息推送插件
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-![Version](https://img.shields.io/badge/version-0.5.1-blue)
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
 
 AstrBot 插件 —— 自动同步 TapTap 官方消息"五维互娱"到 QQ 群聊/私聊。
 
