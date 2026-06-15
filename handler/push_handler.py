@@ -16,32 +16,47 @@ class PushHandler:
         self.access_control = access_control
 
     async def push_new_posts(self, posts: list[PostItem], config: dict):
-        """推送新消息列表到所有被允许的群聊/私聊。"""
+        """推送新消息到所有被允许的群聊/私聊。"""
         groups, privates = self.access_control.get_push_targets()
 
         if not groups and not privates:
             logger.info("无推送目标（黑名单模式无法枚举全部，请使用白名单）")
             return
 
-        text = self._format_push_list(posts, config)
+        mode = config.get("push_mode", "list")
 
+        # 先发消息列表作为摘要（底部有查看详情提示）
+        list_text = self._format_push_list(posts, config)
         for group_id in groups:
             try:
-                await self._send_text(group_id=group_id, text=text)
-                logger.info(
-                    f"已推送 {len(posts)} 条新消息标题到群 {group_id}"
-                )
+                await self._send_text(group_id=group_id, text=list_text)
             except Exception as e:
-                logger.error(f"推送群 {group_id} 失败: {e}")
-
+                logger.error(f"推送群 {group_id} 列表失败: {e}")
         for user_id in privates:
             try:
-                await self._send_text(user_id=user_id, text=text)
-                logger.info(
-                    f"已推送 {len(posts)} 条新消息标题到用户 {user_id}"
-                )
+                await self._send_text(user_id=user_id, text=list_text)
             except Exception as e:
-                logger.error(f"推送用户 {user_id} 失败: {e}")
+                logger.error(f"推送用户 {user_id} 列表失败: {e}")
+
+        # 详情模式：逐条展开
+        if mode == "detail":
+            for post in posts:
+                detail_text = self._format_post_detail(post)
+                for group_id in groups:
+                    try:
+                        await self._send_text(group_id=group_id, text=detail_text)
+                    except Exception as e:
+                        logger.error(f"推送群 {group_id} 详情失败: {e}")
+                for user_id in privates:
+                    try:
+                        await self._send_text(user_id=user_id, text=detail_text)
+                    except Exception as e:
+                        logger.error(f"推送用户 {user_id} 详情失败: {e}")
+
+        logger.info(
+            f"已推送 {len(posts)} 条新消息到 {len(groups)} 个群 + {len(privates)} 个用户 "
+            f"(mode={mode})"
+        )
 
     @staticmethod
     def _format_push_list(posts: list[PostItem], config: dict) -> str:
@@ -58,6 +73,29 @@ class PushHandler:
         )
         kw_display = " / ".join(keywords)
         lines.append(f"发送 {kw_display} 查看完整列表与详情")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_post_detail(post: PostItem) -> str:
+        """格式化单条帖子详情文本（含有序图文）。"""
+        lines = [f"【{post.title}】"]
+        lines.append(f"发布时间: {post.published_at}")
+        if post.url:
+            lines.append(f"原帖链接: {post.url}")
+        lines.append("")
+
+        if post.ordered_content:
+            for seg in post.ordered_content:
+                if seg.get("type") == "text":
+                    lines.append(seg["text"])
+                elif seg.get("type") == "image":
+                    lines.append(seg["url"])
+        elif post.summary:
+            lines.append(post.summary)
+            if post.images:
+                for img in post.images:
+                    lines.append(f"[图片: {img}]")
+
         return "\n".join(lines)
 
     # ---------- sending ----------
