@@ -4,9 +4,9 @@
 """
 
 import asyncio
+import subprocess
+import sys
 from io import BytesIO
-from pathlib import Path
-from typing import Any
 
 from astrbot.api import logger
 
@@ -25,6 +25,33 @@ TAP_MOMENT_URL = "https://www.taptap.cn/moment/{post_id}"
 DEFAULT_TIMEOUT = 30000  # 30秒超时
 DEFAULT_VIEWPORT = {"width": 1280, "height": 800}
 
+_chromium_installed = False
+
+
+async def _ensure_chromium():
+    """确保 Playwright Chromium 已安装。仅在首次调用时执行。"""
+    global _chromium_installed
+    if _chromium_installed:
+        return
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "playwright", "install", "chromium",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        if proc.returncode == 0:
+            logger.info("✅ Playwright Chromium 安装完成")
+            _chromium_installed = True
+        else:
+            err = stderr.decode(errors="ignore").strip()
+            logger.warning(f"⚠️ Playwright Chromium 安装失败 (rc={proc.returncode}): {err[:200]}")
+    except asyncio.TimeoutError:
+        logger.warning("⚠️ Playwright Chromium 安装超时（5分钟）")
+    except Exception as e:
+        logger.warning(f"⚠️ Playwright Chromium 安装异常: {e}")
+
 
 class PageScreenshotRenderer:
     """使用 Playwright 截取页面截图"""
@@ -35,17 +62,21 @@ class PageScreenshotRenderer:
 
     async def _ensure_browser(self) -> Browser:
         """确保浏览器实例已启动"""
-        if self._browser is None or not self._browser.is_connected():
-            if not PLAYWRIGHT_AVAILABLE:
-                raise RuntimeError("playwright 未安装")
+        if self._browser is not None and self._browser.is_connected():
+            return self._browser
 
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=['--no-sandbox', '--disable-dev-shm-usage']
-            )
-            logger.info("Playwright 浏览器已启动")
+        if not PLAYWRIGHT_AVAILABLE:
+            raise RuntimeError("playwright 未安装")
 
+        # 先确保 chromium 二进制已安装
+        await _ensure_chromium()
+
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-dev-shm-usage']
+        )
+        logger.info("Playwright 浏览器已启动")
         return self._browser
 
     async def close(self):
@@ -59,14 +90,7 @@ class PageScreenshotRenderer:
         logger.info("Playwright 浏览器已关闭")
 
     async def capture_post_screenshot(self, post_id: str) -> BytesIO | None:
-        """截取帖子页面的截图
-
-        Args:
-            post_id: 帖子 ID
-
-        Returns:
-            BytesIO 对象，包含 PNG 格式的图片数据；失败时返回 None
-        """
+        """截取帖子页面的截图"""
         if not PLAYWRIGHT_AVAILABLE:
             logger.warning("playwright 未安装，无法截取页面")
             return None
@@ -79,26 +103,17 @@ class PageScreenshotRenderer:
             page = await browser.new_page(viewport=DEFAULT_VIEWPORT)
 
             try:
-                # 导航到页面
                 await page.goto(url, wait_until='networkidle', timeout=DEFAULT_TIMEOUT)
-
-                # 等待页面内容加载
                 await self._wait_for_content(page)
 
-                # 尝试定位帖子内容区域
                 content_area = await self._find_content_area(page)
 
                 if content_area:
-                    # 截取内容区域
                     screenshot_bytes = await content_area.screenshot(type='png')
                     logger.info(f"✅ 成功截取帖子内容区域: {post_id}")
                 else:
-                    # 截取整个页面
                     logger.warning(f"未找到帖子内容区域，截取整个页面: {post_id}")
-                    screenshot_bytes = await page.screenshot(
-                        full_page=True,
-                        type='png'
-                    )
+                    screenshot_bytes = await page.screenshot(full_page=True, type='png')
 
                 return BytesIO(screenshot_bytes)
 
@@ -112,37 +127,29 @@ class PageScreenshotRenderer:
     async def _wait_for_content(self, page: Page):
         """等待页面内容加载完成"""
         try:
-            # 等待主要内容出现
-            # 根据 TapTap 页面结构调整选择器
             await page.wait_for_selector(
                 'article, .moment-content, .topic-content, [class*="content"]',
                 timeout=10000
             )
         except Exception:
-            # 如果没有找到特定选择器，等待一段时间
             await asyncio.sleep(2)
 
     async def _find_content_area(self, page: Page):
-        """查找帖子内容区域
-
-        尝试多种 CSS 选择器来定位帖子内容。
-        """
-        # 可能的内容区域选择器（按优先级）
+        """查找帖子内容区域"""
         selectors = [
-            'article',  # 语义化标签
-            '[class*="moment-content"]',  # moment 内容
-            '[class*="topic-content"]',  # topic 内容
-            '[class*="post-content"]',  # post 内容
-            '[class*="content-detail"]',  # 内容详情
-            'main',  # 主内容区域
-            '#__next > div > div',  # Next.js 布局
+            'article',
+            '[class*="moment-content"]',
+            '[class*="topic-content"]',
+            '[class*="post-content"]',
+            '[class*="content-detail"]',
+            'main',
+            '#__next > div > div',
         ]
 
         for selector in selectors:
             try:
                 element = page.locator(selector).first
                 if await element.is_visible():
-                    # 检查元素是否有足够的内容
                     box = await element.bounding_box()
                     if box and box['height'] > 100:
                         logger.debug(f"找到内容区域: {selector}")
@@ -166,14 +173,7 @@ async def get_screenshot_renderer() -> PageScreenshotRenderer:
 
 
 async def capture_post_screenshot(post_id: str) -> BytesIO | None:
-    """截取帖子页面截图的便捷函数
-
-    Args:
-        post_id: 帖子 ID
-
-    Returns:
-        BytesIO 对象，包含 PNG 格式的图片数据；失败时返回 None
-    """
+    """截取帖子页面截图的便捷函数"""
     renderer = await get_screenshot_renderer()
     return await renderer.capture_post_screenshot(post_id)
 
