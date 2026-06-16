@@ -83,9 +83,9 @@
     "default": "detail"
   },
   "detail_display_mode": {
-    "description": "消息详情展示方式：text_image = 图文混排（原有方式），image = 整条消息生成为图片发送",
+    "description": "消息详情展示方式：text_image = 图文混排，playwright = Playwright 截取页面长图，pillow = Pillow 渲染生成图片",
     "type": "string",
-    "options": ["text_image", "image"],
+    "options": ["text_image", "playwright", "pillow"],
     "default": "text_image"
   },
   "admin_qq": {

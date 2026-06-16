@@ -6,7 +6,7 @@ from astrbot.api import logger
 
 from ..crawler.parser import PostItem
 from ..crawler.image_renderer import render_post_to_image
-from ..crawler.page_screenshot import capture_post_screenshot
+from ..crawler.page_screenshot import capture_posts_screenshot_batch
 from ..crawler import write_temp_image
 from ..filter.access_control import AccessControl
 
@@ -41,32 +41,132 @@ class PushHandler:
             except Exception as e:
                 logger.error(f"推送用户 {user_id} 列表失败: {e}")
 
-        # 详情模式：每个帖子一条 MessageChain
-        # Plain 文字 + Image 图片按 ordered_content 顺序混排
-        if mode == "detail":
-            display_mode = config.get("detail_display_mode", "text_image")
-            for post in posts:
-                if display_mode == "image":
-                    # 图片消息模式：将整个帖子渲染为图片
-                    await self._send_post_as_image(post, groups, privates)
-                else:
-                    # 图文消息模式：使用原有的图文混排方式
-                    chain = self._build_post_chain(post)
-                    for group_id in groups:
-                        try:
-                            await self._send_chain(group_id=group_id, chain=chain)
-                        except Exception as e:
-                            logger.error(f"推送群 {group_id} 详情失败: {e}")
-                    for user_id in privates:
-                        try:
-                            await self._send_chain(user_id=user_id, chain=chain)
-                        except Exception as e:
-                            logger.error(f"推送用户 {user_id} 详情失败: {e}")
+        if mode != "detail":
+            return
+
+        display_mode = config.get("detail_display_mode", "text_image")
+
+        if display_mode == "playwright":
+            await self._push_detail_playwright(posts, groups, privates)
+        elif display_mode == "pillow":
+            await self._push_detail_pillow(posts, groups, privates)
+        else:
+            await self._push_detail_text_image(posts, groups, privates)
 
         logger.info(
             f"已推送 {len(posts)} 条新消息到 {len(groups)} 个群 "
-            f"+ {len(privates)} 个用户 (mode={mode})"
+            f"+ {len(privates)} 个用户 (mode={mode}, display={display_mode})"
         )
+
+    # ---------- 详情推送：图文混排 ----------
+
+    async def _push_detail_text_image(
+        self, posts: list[PostItem], groups: list[str], privates: list[str]
+    ):
+        for post in posts:
+            chain = self._build_post_chain(post)
+            for target_id in groups:
+                try:
+                    await self._send_chain(group_id=target_id, chain=chain)
+                except Exception as e:
+                    logger.error(f"推送群 {target_id} 详情失败: {e}")
+            for target_id in privates:
+                try:
+                    await self._send_chain(user_id=target_id, chain=chain)
+                except Exception as e:
+                    logger.error(f"推送用户 {target_id} 详情失败: {e}")
+
+    # ---------- 详情推送：Playwright 批量截图 ----------
+
+    async def _push_detail_playwright(
+        self, posts: list[PostItem], groups: list[str], privates: list[str]
+    ):
+        from ..crawler.page_screenshot import capture_posts_screenshot_batch
+
+        # 1. 生成截图清单
+        post_ids = [p.post_id for p in posts if p.post_id]
+        if not post_ids:
+            logger.warning("无有效 post_id，回退到图文模式")
+            await self._push_detail_text_image(posts, groups, privates)
+            return
+
+        # 2. 批量截图（开一次 Chromium，截完关掉）
+        logger.info(f"开始 Playwright 批量截图: {len(post_ids)} 帖")
+        screenshots = await capture_posts_screenshot_batch(post_ids)
+
+        # 3. 逐帖发送
+        for post in posts:
+            buf = screenshots.get(post.post_id)
+            if buf:
+                await self._send_image(buf, post.title, groups, privates)
+            else:
+                # 截图失败，回退到图文
+                logger.warning(f"截图失败，回退图文: {post.title[:20]}")
+                chain = self._build_post_chain(post)
+                for target_id in groups:
+                    try:
+                        await self._send_chain(group_id=target_id, chain=chain)
+                    except Exception as e:
+                        logger.error(f"推送群 {target_id} 详情失败: {e}")
+                for target_id in privates:
+                    try:
+                        await self._send_chain(user_id=target_id, chain=chain)
+                    except Exception as e:
+                        logger.error(f"推送用户 {target_id} 详情失败: {e}")
+
+    # ---------- 详情推送：Pillow 逐帖渲染 ----------
+
+    async def _push_detail_pillow(
+        self, posts: list[PostItem], groups: list[str], privates: list[str]
+    ):
+        for post in posts:
+            try:
+                buf = await render_post_to_image(post)
+            except Exception as e:
+                logger.warning(f"Pillow 渲染失败: {post.title[:20]}: {e}")
+                buf = None
+
+            if buf:
+                await self._send_image(buf, post.title, groups, privates)
+            else:
+                logger.warning(f"Pillow 渲染失败，回退图文: {post.title[:20]}")
+                chain = self._build_post_chain(post)
+                for target_id in groups:
+                    try:
+                        await self._send_chain(group_id=target_id, chain=chain)
+                    except Exception as e:
+                        logger.error(f"推送群 {target_id} 详情失败: {e}")
+                for target_id in privates:
+                    try:
+                        await self._send_chain(user_id=target_id, chain=chain)
+                    except Exception as e:
+                        logger.error(f"推送用户 {target_id} 详情失败: {e}")
+
+    # ---------- 发送图片 ----------
+
+    async def _send_image(
+        self, buf, title: str, groups: list[str], privates: list[str]
+    ):
+        """将 BytesIO 写临时文件后发送为图片消息。"""
+        from astrbot.api.event import MessageChain
+        from astrbot.api.message_components import Image as ImageComponent
+
+        temp_path = write_temp_image(buf)
+        chain = MessageChain()
+        chain.chain = [ImageComponent(temp_path)]
+
+        for target_id in groups:
+            try:
+                await self._send_chain(group_id=target_id, chain=chain)
+            except Exception as e:
+                logger.error(f"推送群 {target_id} 图片失败: {e}")
+        for target_id in privates:
+            try:
+                await self._send_chain(user_id=target_id, chain=chain)
+            except Exception as e:
+                logger.error(f"推送用户 {target_id} 图片失败: {e}")
+
+    # ---------- 辅助 ----------
 
     @staticmethod
     def _format_push_list(posts: list[PostItem], config: dict) -> str:
@@ -84,24 +184,20 @@ class PushHandler:
         lines.append(f"发送 {kw_display} 查看完整列表与详情")
         return "\n".join(lines)
 
-    # ---------- 单帖详情链条构造 ----------
-
     @staticmethod
     def _build_post_chain(post: PostItem):
-        """构造与序号回复详情完全一致的 MessageChain。"""
+        """构造图文混排 MessageChain。"""
         from astrbot.api.event import MessageChain
         from astrbot.api.message_components import Plain, Image
 
         chain = MessageChain()
         parts = []
 
-        # 头部（与 query_handler.handle_index_reply 一致）
         header = f"【{post.title}】\n\n发布时间: {post.published_at}"
         if post.url:
             header += f"\n原帖链接: {post.url}"
         parts.append(Plain(text=header))
 
-        # 有序内容
         if post.ordered_content:
             for seg in post.ordered_content:
                 if seg.get("type") == "text":
@@ -115,76 +211,11 @@ class PushHandler:
         chain.chain = parts
         return chain
 
-    # ---------- 图片消息发送 ----------
-
-    async def _send_post_as_image(self, post: PostItem, groups: list[str], privates: list[str]):
-        """将帖子渲染为图片并发送
-
-        优先使用页面截图，如果失败则回退到 Pillow 自绘。
-        """
-        from astrbot.api.event import MessageChain
-        from astrbot.api.message_components import Image as ImageComponent
-
-        image_buf = None
-
-        # 方式一：页面截图（优先）
-        if post.post_id:
-            try:
-                image_buf = await capture_post_screenshot(post.post_id)
-                if image_buf:
-                    logger.info(f"✅ 页面截图成功: {post.title[:20]}...")
-            except Exception as e:
-                logger.warning(f"页面截图失败 {post.post_id}: {e}")
-
-        # 方式二：Pillow 自绘（回退）
-        if not image_buf:
-            try:
-                image_buf = await render_post_to_image(post)
-                if image_buf:
-                    logger.info(f"✅ Pillow 渲染成功: {post.title[:20]}...")
-            except Exception as e:
-                logger.warning(f"Pillow 渲染失败: {e}")
-
-        # 方式三：回退到图文模式
-        if not image_buf:
-            logger.warning(f"所有图片渲染方式均失败，回退到图文模式: {post.title[:20]}...")
-            chain = self._build_post_chain(post)
-            for group_id in groups:
-                try:
-                    await self._send_chain(group_id=group_id, chain=chain)
-                except Exception as e:
-                    logger.error(f"推送群 {group_id} 详情失败: {e}")
-            for user_id in privates:
-                try:
-                    await self._send_chain(user_id=user_id, chain=chain)
-                except Exception as e:
-                    logger.error(f"推送用户 {user_id} 详情失败: {e}")
-            return
-
-        # 构造图片消息链
-        chain = MessageChain()
-        # 将 BytesIO 转换为 base64 或直接使用
-        # AstrBot 的 Image 组件支持 BytesIO 对象
-        chain.chain = [ImageComponent(write_temp_image(image_buf))]
-
-        # 发送图片消息
-        for group_id in groups:
-            try:
-                await self._send_chain(group_id=group_id, chain=chain)
-            except Exception as e:
-                logger.error(f"推送群 {group_id} 图片消息失败: {e}")
-        for user_id in privates:
-            try:
-                await self._send_chain(user_id=user_id, chain=chain)
-            except Exception as e:
-                logger.error(f"推送用户 {user_id} 图片消息失败: {e}")
-
     # ---------- 发送通道 ----------
 
     async def _send_text(
         self, group_id: str = "", user_id: str = "", text: str = ""
     ):
-        """发送纯文本消息。"""
         from astrbot.api.event import MessageChain
         from astrbot.api.message_components import Plain
 
@@ -198,7 +229,6 @@ class PushHandler:
         user_id: str = "",
         chain=None,
     ):
-        """发送 MessageChain — 试 send_message 再 adapter 兜底。"""
         from astrbot.api.event import MessageChain
 
         if chain is None:
@@ -215,7 +245,6 @@ class PushHandler:
             else f"{pid}:FriendMessage:{target_id}"
         )
 
-        # 方式一：context.send_message
         if hasattr(self.context, "send_message"):
             try:
                 ok = await self.context.send_message(session_str, chain)
@@ -225,7 +254,6 @@ class PushHandler:
             except Exception as e:
                 logger.warning(f"[推送] send_message 异常: {e}")
 
-        # 方式二：adapter 直发
         try:
             from astrbot.core.platform.astr_message_event import MessageSesion
             from astrbot.core.platform.message_type import MessageType
@@ -245,7 +273,6 @@ class PushHandler:
         logger.warning(f"[推送] ❌ 所有方式均失败: {target_id}")
 
     def _get_platform_id(self) -> str:
-        """获取 aiocqhttp 平台适配器的 meta().id"""
         try:
             for plat in self.context.platform_manager.platform_insts:
                 if plat.meta().name == "aiocqhttp":
