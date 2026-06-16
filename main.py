@@ -14,6 +14,8 @@ from astrbot.api.star import Star, Context
 
 from .crawler.taptap_client import TapTapClient
 from .crawler.parser import PostParser
+from .crawler.image_renderer import render_post_to_image
+from .crawler.page_screenshot import capture_post_screenshot, cleanup as cleanup_screenshot
 from .cache.post_cache import PostCache
 from .filter.access_control import AccessControl
 from .handler.query_handler import QueryHandler
@@ -78,7 +80,7 @@ class OnePercentNewsPlugin(Star):
                 f"🗑️ 已自动清理 {deleted} 条旧缓存，将在首次交互时重新爬取"
             )
 
-        logger.info("百分之一消息推送插件已加载（v1.0.0），即将执行首次爬取")
+        logger.info("百分之一消息推送插件已加载（v1.1.0），即将执行首次爬取")
 
         # 通过事件循环延迟调度首次爬取（保证 __init__ 返回后事件循环已就绪）
         try:
@@ -125,6 +127,13 @@ class OnePercentNewsPlugin(Star):
                 await self._crawl_task
             except asyncio.CancelledError:
                 pass
+
+        # 关闭截图浏览器实例
+        try:
+            await cleanup_screenshot()
+        except Exception as e:
+            logger.warning(f"关闭截图浏览器失败: {e}")
+
         logger.info("百分之一消息推送插件已停止")
 
     async def _crawl_loop(self, interval: int):
@@ -297,13 +306,63 @@ class OnePercentNewsPlugin(Star):
             )
             if handled:
                 if reply_text:
-                    chain = [Plain(text=reply_text)]
-                    for seg in ordered_content:
-                        if seg.get("type") == "text":
-                            chain.append(Plain(text=seg["text"]))
-                        elif seg.get("type") == "image":
-                            chain.append(Image(seg["url"]))
-                    yield event.chain_result(chain)
+                    display_mode = self.config.get("detail_display_mode", "text_image")
+                    if display_mode == "image":
+                        # 图片消息模式：将整个帖子渲染为图片
+                        # 需要从缓存中获取完整的 PostItem
+                        post = self.cache.get_post_by_index(index, self.config.get("list_count", 10))
+                        if post:
+                            image_buf = None
+
+                            # 方式一：页面截图（优先）
+                            if post.post_id:
+                                try:
+                                    image_buf = await capture_post_screenshot(post.post_id)
+                                    if image_buf:
+                                        logger.info(f"✅ 页面截图成功: {post.title[:20]}...")
+                                except Exception as e:
+                                    logger.warning(f"页面截图失败 {post.post_id}: {e}")
+
+                            # 方式二：Pillow 自绘（回退）
+                            if not image_buf:
+                                try:
+                                    image_buf = await render_post_to_image(post)
+                                    if image_buf:
+                                        logger.info(f"✅ Pillow 渲染成功: {post.title[:20]}...")
+                                except Exception as e:
+                                    logger.warning(f"Pillow 渲染失败: {e}")
+
+                            # 方式三：回退到图文模式
+                            if image_buf:
+                                chain = [Image(image_buf)]
+                                yield event.chain_result(chain)
+                            else:
+                                logger.warning(f"所有图片渲染方式均失败，回退到图文模式: {post.title[:20]}...")
+                                chain = [Plain(text=reply_text)]
+                                for seg in ordered_content:
+                                    if seg.get("type") == "text":
+                                        chain.append(Plain(text=seg["text"]))
+                                    elif seg.get("type") == "image":
+                                        chain.append(Image(seg["url"]))
+                                yield event.chain_result(chain)
+                        else:
+                            # 回退到图文模式
+                            chain = [Plain(text=reply_text)]
+                            for seg in ordered_content:
+                                if seg.get("type") == "text":
+                                    chain.append(Plain(text=seg["text"]))
+                                elif seg.get("type") == "image":
+                                    chain.append(Image(seg["url"]))
+                            yield event.chain_result(chain)
+                    else:
+                        # 图文消息模式
+                        chain = [Plain(text=reply_text)]
+                        for seg in ordered_content:
+                            if seg.get("type") == "text":
+                                chain.append(Plain(text=seg["text"]))
+                            elif seg.get("type") == "image":
+                                chain.append(Image(seg["url"]))
+                        yield event.chain_result(chain)
                 event.stop_event()
             return
 
