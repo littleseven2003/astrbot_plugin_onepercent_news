@@ -16,6 +16,7 @@ from .crawler.taptap_client import TapTapClient
 from .crawler.parser import PostParser
 from .crawler.image_renderer import render_post_to_image
 from .crawler.page_screenshot import capture_post_screenshot, cleanup as cleanup_screenshot
+from .crawler import write_temp_image
 from .cache.post_cache import PostCache
 from .filter.access_control import AccessControl
 from .handler.query_handler import QueryHandler
@@ -334,7 +335,7 @@ class OnePercentNewsPlugin(Star):
 
                             # 方式三：回退到图文模式
                             if image_buf:
-                                chain = [Image(image_buf)]
+                                chain = [Image(write_temp_image(image_buf))]
                                 yield event.chain_result(chain)
                             else:
                                 logger.warning(f"所有图片渲染方式均失败，回退到图文模式: {post.title[:20]}...")

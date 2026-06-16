@@ -7,6 +7,7 @@ from astrbot.api import logger
 from ..crawler.parser import PostItem
 from ..crawler.image_renderer import render_post_to_image
 from ..crawler.page_screenshot import capture_post_screenshot
+from ..crawler import write_temp_image
 from ..filter.access_control import AccessControl
 
 
@@ -164,7 +165,7 @@ class PushHandler:
         chain = MessageChain()
         # 将 BytesIO 转换为 base64 或直接使用
         # AstrBot 的 Image 组件支持 BytesIO 对象
-        chain.chain = [ImageComponent(image_buf)]
+        chain.chain = [ImageComponent(write_temp_image(image_buf))]
 
         # 发送图片消息
         for group_id in groups:

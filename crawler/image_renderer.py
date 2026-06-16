@@ -14,9 +14,22 @@ from astrbot.api import logger
 
 from .parser import PostItem
 
-# 默认字体路径
-FONT_DIR = Path(__file__).parent.parent / "fonts"
-DEFAULT_FONT = FONT_DIR / "NotoSansSC-Regular.ttf"
+# 候选中文字体路径（按优先级）
+_CANDIDATE_FONTS = [
+    # 插件自带
+    Path(__file__).parent.parent / "fonts" / "NotoSansSC-Regular.ttf",
+    # Linux 常见
+    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+    Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+    Path("/usr/share/fonts/truetype/noto/NotoSansSC-Regular.otf"),
+    Path("/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf"),
+    Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+    Path("/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    # macOS
+    Path("/System/Library/Fonts/PingFang.ttc"),
+    Path("/System/Library/Fonts/STHeiti Light.ttc"),
+]
 
 # 图片参数
 IMAGE_WIDTH = 800
@@ -29,11 +42,29 @@ TITLE_COLOR = (0, 0, 0)   # #000
 BG_COLOR = (255, 255, 255)  # 白色
 
 
+def _find_system_font() -> str | None:
+    """在系统中查找可用的中文字体，返回路径或 None。"""
+    for p in _CANDIDATE_FONTS:
+        if p.is_file():
+            return str(p)
+    return None
+
+
+def _get_font(size: int = FONT_SIZE) -> ImageFont.FreeTypeFont:
+    """获取指定大小的字体。优先系统中文字体，兜底 Pillow 默认字体。"""
+    font_path = _find_system_font()
+    if font_path:
+        try:
+            return ImageFont.truetype(font_path, size)
+        except Exception as e:
+            logger.warning(f"加载系统字体失败 ({font_path}): {e}")
+    return ImageFont.load_default()
+
+
 class ImageRenderer:
     """将 PostItem 渲染为图片"""
 
-    def __init__(self, font_path: str | None = None):
-        self.font_path = font_path or str(DEFAULT_FONT)
+    def __init__(self):
         self._font = None
         self._title_font = None
 
@@ -44,16 +75,12 @@ class ImageRenderer:
         if size == TITLE_FONT_SIZE and self._title_font:
             return self._title_font
 
-        try:
-            font = ImageFont.truetype(self.font_path, size)
-            if size == FONT_SIZE:
-                self._font = font
-            elif size == TITLE_FONT_SIZE:
-                self._title_font = font
-            return font
-        except Exception as e:
-            logger.warning(f"加载字体失败: {e}，使用默认字体")
-            return ImageFont.load_default()
+        font = _get_font(size)
+        if size == FONT_SIZE:
+            self._font = font
+        elif size == TITLE_FONT_SIZE:
+            self._title_font = font
+        return font
 
     async def render_post_to_image(self, post: PostItem) -> BytesIO | None:
         """将 PostItem 渲染为图片，返回 BytesIO 对象"""
