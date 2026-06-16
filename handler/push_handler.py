@@ -6,7 +6,6 @@ from astrbot.api import logger
 
 from ..crawler.parser import PostItem
 from ..crawler.image_renderer import render_post_to_image
-from ..crawler.page_screenshot import capture_posts_screenshot_batch
 from ..crawler import write_temp_image
 from ..filter.access_control import AccessControl
 
