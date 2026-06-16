@@ -1,6 +1,6 @@
 [project]
 name = "astrbot-plugin-onepercent-news"
-version = "1.1.4"
+version = "1.1.5"
 description = "百分之一消息推送插件 - 自动同步 TapTap 官方消息到 QQ"
 readme = "README.md"
 requires-python = ">=3.10"

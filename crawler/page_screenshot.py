@@ -1,12 +1,14 @@
 """页面截图模块 - 使用 Playwright 截取 TapTap 帖子页面
 
-批量模式：收集清单 → 一次性打开 Chromium → 逐帖截图 → 关闭 Chromium。
-单帖模式：内部复用批量函数（清单只有 1 项）。
+screenshot_session(): 上下文管理器，保持 Chromium 开放，
+逐帖截图并立刻通过回调发送，全部完成后自动关闭浏览器。
 """
 
 import asyncio
 import sys
+from contextlib import asynccontextmanager
 from io import BytesIO
+from typing import Callable, Awaitable
 
 from astrbot.api import logger
 
@@ -22,7 +24,6 @@ TAP_MOMENT_URL = "https://www.taptap.cn/moment/{post_id}"
 DEFAULT_VIEWPORT = {"width": 800, "height": 800}
 DEFAULT_TIMEOUT = 30000
 
-# 注入 CSS/JS：隐藏 fixed/sticky 元素
 HIDE_FIXED_CSS = """
     *, *::before, *::after {
         animation: none !important;
@@ -110,51 +111,44 @@ async def _screenshot_single_page(browser: Browser, post_id: str) -> BytesIO | N
         await page.close()
 
 
-async def capture_posts_screenshot_batch(post_ids: list[str]) -> dict[str, BytesIO]:
-    """批量截图：一次性打开 Chromium，逐帖截图，关闭 Chromium。
+@asynccontextmanager
+async def screenshot_session():
+    """截图会话上下文管理器。
 
-    Args:
-        post_ids: 需要截图的帖子 ID 列表
+    打开 Chromium → yield 截图函数 → 全部完成后自动关闭。
 
-    Returns:
-        {post_id: BytesIO} 的字典，失败的帖子不在字典中
+    Usage:
+        async with screenshot_session() as screenshot:
+            for post in posts:
+                buf = await screenshot(post.post_id)
+                if buf:
+                    await send_image(buf)
     """
-    if not PLAYWRIGHT_AVAILABLE or not post_ids:
-        return {}
+    if not PLAYWRIGHT_AVAILABLE:
+        raise RuntimeError("playwright 未安装")
 
     await _ensure_chromium()
 
-    results: dict[str, BytesIO] = {}
-    browser = None
-    pw = None
+    pw = await async_playwright().start()
+    browser = await pw.chromium.launch(
+        headless=True,
+        args=['--no-sandbox', '--disable-dev-shm-usage']
+    )
+    logger.info("Playwright 浏览器已启动（截图会话）")
+
+    async def _screenshot(post_id: str) -> BytesIO | None:
+        return await _screenshot_single_page(browser, post_id)
 
     try:
-        pw = await async_playwright().start()
-        browser = await pw.chromium.launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-dev-shm-usage']
-        )
-        logger.info(f"Playwright 浏览器已启动，开始批量截图 ({len(post_ids)} 帖)")
-
-        for pid in post_ids:
-            buf = await _screenshot_single_page(browser, pid)
-            if buf:
-                results[pid] = buf
-
-        logger.info(f"批量截图完成: {len(results)}/{len(post_ids)} 成功")
-
-    except Exception as e:
-        logger.error(f"批量截图异常: {e}", exc_info=True)
+        yield _screenshot
     finally:
-        if browser:
-            await browser.close()
-        if pw:
-            await pw.stop()
-
-    return results
+        await browser.close()
+        await pw.stop()
+        logger.info("Playwright 浏览器已关闭（截图会话结束）")
 
 
+# 保留单帖便捷函数（用于序号交互等场景）
 async def capture_post_screenshot(post_id: str) -> BytesIO | None:
-    """单帖截图（内部调用批量函数，清单只有 1 项）。"""
-    results = await capture_posts_screenshot_batch([post_id])
-    return results.get(post_id)
+    """单帖截图：开 Chromium → 截一张 → 关闭。"""
+    async with screenshot_session() as screenshot:
+        return await screenshot(post_id)

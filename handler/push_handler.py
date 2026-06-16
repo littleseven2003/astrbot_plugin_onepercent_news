@@ -81,38 +81,40 @@ class PushHandler:
     async def _push_detail_playwright(
         self, posts: list[PostItem], groups: list[str], privates: list[str]
     ):
-        from ..crawler.page_screenshot import capture_posts_screenshot_batch
+        from ..crawler.page_screenshot import screenshot_session
 
-        # 1. 生成截图清单
         post_ids = [p.post_id for p in posts if p.post_id]
         if not post_ids:
             logger.warning("无有效 post_id，回退到图文模式")
             await self._push_detail_text_image(posts, groups, privates)
             return
 
-        # 2. 批量截图（开一次 Chromium，截完关掉）
-        logger.info(f"开始 Playwright 批量截图: {len(post_ids)} 帖")
-        screenshots = await capture_posts_screenshot_batch(post_ids)
+        logger.info(f"开始 Playwright 截图推送: {len(post_ids)} 帖")
+        post_map = {p.post_id: p for p in posts}
 
-        # 3. 逐帖发送
-        for post in posts:
-            buf = screenshots.get(post.post_id)
-            if buf:
-                await self._send_image(buf, post.title, groups, privates)
-            else:
-                # 截图失败，回退到图文
-                logger.warning(f"截图失败，回退图文: {post.title[:20]}")
-                chain = self._build_post_chain(post)
-                for target_id in groups:
-                    try:
-                        await self._send_chain(group_id=target_id, chain=chain)
-                    except Exception as e:
-                        logger.error(f"推送群 {target_id} 详情失败: {e}")
-                for target_id in privates:
-                    try:
-                        await self._send_chain(user_id=target_id, chain=chain)
-                    except Exception as e:
-                        logger.error(f"推送用户 {target_id} 详情失败: {e}")
+        try:
+            async with screenshot_session() as screenshot:
+                for pid in post_ids:
+                    buf = await screenshot(pid)
+                    if buf:
+                        await self._send_image(buf, post_map[pid].title, groups, privates)
+                    else:
+                        post = post_map[pid]
+                        logger.warning(f"截图失败，回退图文: {post.title[:20]}")
+                        chain = self._build_post_chain(post)
+                        for target_id in groups:
+                            try:
+                                await self._send_chain(group_id=target_id, chain=chain)
+                            except Exception as e:
+                                logger.error(f"推送群 {target_id} 失败: {e}")
+                        for target_id in privates:
+                            try:
+                                await self._send_chain(user_id=target_id, chain=chain)
+                            except Exception as e:
+                                logger.error(f"推送用户 {target_id} 失败: {e}")
+        except Exception as e:
+            logger.error(f"Playwright 截图会话异常: {e}", exc_info=True)
+            await self._push_detail_text_image(posts, groups, privates)
 
     # ---------- 详情推送：Pillow 逐帖渲染 ----------
 
