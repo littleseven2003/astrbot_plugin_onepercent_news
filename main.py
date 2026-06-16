@@ -81,7 +81,7 @@ class OnePercentNewsPlugin(Star):
                 f"🗑️ 已自动清理 {deleted} 条旧缓存，将在首次交互时重新爬取"
             )
 
-        logger.info("百分之一消息推送插件已加载（v1.1.1），即将执行首次爬取")
+        logger.info("百分之一消息推送插件已加载（v1.1.2），即将执行首次爬取")
 
         # 通过事件循环延迟调度首次爬取（保证 __init__ 返回后事件循环已就绪）
         try:
@@ -104,6 +104,10 @@ class OnePercentNewsPlugin(Star):
         if self._initial_crawl_done:
             return
         self._initial_crawl_done = True
+
+        # 确保 Playwright Chromium 已安装（仅首次，阻塞等待）
+        from .crawler.page_screenshot import _ensure_chromium
+        await _ensure_chromium()
 
         logger.info("🚀 执行首次爬取...")
         try:
