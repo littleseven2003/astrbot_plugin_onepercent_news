@@ -82,6 +82,12 @@
     "options": ["list", "detail"],
     "default": "detail"
   },
+  "detail_display_mode": {
+    "description": "消息详情展示方式：text_image = 图文混排（原有方式），image = 整条消息生成为图片发送",
+    "type": "string",
+    "options": ["text_image", "image"],
+    "default": "text_image"
+  },
   "admin_qq": {
     "description": "管理员 QQ 号列表（只有在这里的 QQ 号可以使用 /清除百分之一消息缓存 命令，一行一个）",
     "type": "list",
