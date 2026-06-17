@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from io import BytesIO
 from typing import Callable, Awaitable
 
+from PIL import Image as PILImage
 from astrbot.api import logger
 
 try:
@@ -92,7 +93,7 @@ async def _scroll_to_load(page):
 
 
 async def _screenshot_single_page(browser: Browser, post_id: str) -> BytesIO | None:
-    """在已有浏览器实例上截取单个帖子。"""
+    """在已有浏览器实例上截取单个帖子，压缩为 JPG 后返回。"""
     url = TAP_MOMENT_URL.format(post_id=post_id)
     page = await browser.new_page(viewport=DEFAULT_VIEWPORT)
     try:
@@ -101,9 +102,18 @@ async def _screenshot_single_page(browser: Browser, post_id: str) -> BytesIO | N
         await page.add_style_tag(content=HIDE_FIXED_CSS)
         await page.evaluate(HIDE_FIXED_JS)
         await asyncio.sleep(0.5)
-        screenshot_bytes = await page.screenshot(full_page=True, type='png')
-        logger.info(f"✅ 截图成功: {post_id}")
-        return BytesIO(screenshot_bytes)
+        png_bytes = await page.screenshot(full_page=True, type='png')
+
+        # PNG → JPG 压缩（去掉 alpha 通道，大幅缩小文件体积）
+        pil_img = PILImage.open(BytesIO(png_bytes))
+        if pil_img.mode in ('RGBA', 'LA', 'P'):
+            pil_img = pil_img.convert('RGB')
+        buf = BytesIO()
+        pil_img.save(buf, format='JPEG', quality=85, optimize=True)
+        buf.seek(0)
+        logger.info(f"✅ 截图成功: {post_id} ({len(buf.getvalue()) // 1024} KB)")
+        return buf
+
     except Exception as e:
         logger.error(f"❌ 截图失败 {post_id}: {e}")
         return None
