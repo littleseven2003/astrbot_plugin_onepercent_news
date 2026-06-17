@@ -1,7 +1,7 @@
 # 百分之一消息推送插件
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 
 AstrBot 插件 —— 自动同步 TapTap 官方消息"五维互娱"到 QQ 群聊/私聊。
 
@@ -33,7 +33,10 @@ AstrBot 插件 —— 自动同步 TapTap 官方消息"五维互娱"到 QQ 群�
 
 ```bash
 # 手动安装依赖（可选）
-pip install httpx beautifulsoup4 lxml
+pip install httpx beautifulsoup4 lxml Pillow playwright
+
+# 如需使用「图片消息」模式，还需安装 Chromium 浏览器
+playwright install chromium
 ```
 
 ### 配置
@@ -50,6 +53,10 @@ pip install httpx beautifulsoup4 lxml
 | `list_count` | 触发关键词时返回的消息条数 | `10` |
 | `interaction_timeout` | 序号交互超时（秒） | `60` |
 | `max_history` | SQLite 缓存上限（条） | `200` |
+| `push_mode` | 推送展示方式：`list`（标题列表）或 `detail`（逐条详情） | `detail` |
+| `detail_display_mode` | 详情展示方式：`text_image`（图文混排）或 `image`（截图为长图） | `text_image` |
+
+> **图片消息模式说明**：使用 `image` 模式需在服务器执行 `playwright install chromium` 安装浏览器。未安装时会自动回退到图文混排模式。
 
 #### 群聊/私聊独立黑白名单
 
