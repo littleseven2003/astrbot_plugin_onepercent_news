@@ -97,7 +97,8 @@ async def _screenshot_single_page(browser: Browser, post_id: str) -> BytesIO | N
     url = TAP_MOMENT_URL.format(post_id=post_id)
     page = await browser.new_page(viewport=DEFAULT_VIEWPORT)
     try:
-        await page.goto(url, wait_until='networkidle', timeout=DEFAULT_TIMEOUT)
+        await page.goto(url, wait_until='domcontentloaded', timeout=15000)
+        await asyncio.sleep(2)
         await _scroll_to_load(page)
         await page.add_style_tag(content=HIDE_FIXED_CSS)
         await page.evaluate(HIDE_FIXED_JS)
