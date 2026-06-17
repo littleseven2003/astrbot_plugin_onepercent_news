@@ -14,6 +14,8 @@ from astrbot.api.star import Star, Context
 
 from .crawler.taptap_client import TapTapClient
 from .crawler.parser import PostParser
+from .crawler.image_renderer import render_post_to_image
+from .crawler import write_temp_image
 from .cache.post_cache import PostCache
 from .filter.access_control import AccessControl
 from .handler.query_handler import QueryHandler
@@ -78,7 +80,7 @@ class OnePercentNewsPlugin(Star):
                 f"🗑️ 已自动清理 {deleted} 条旧缓存，将在首次交互时重新爬取"
             )
 
-        logger.info("百分之一消息推送插件已加载（v1.0.0），即将执行首次爬取")
+        logger.info("百分之一消息推送插件已加载（v1.0.8），即将执行首次爬取")
 
         # 通过事件循环延迟调度首次爬取（保证 __init__ 返回后事件循环已就绪）
         try:
@@ -101,6 +103,10 @@ class OnePercentNewsPlugin(Star):
         if self._initial_crawl_done:
             return
         self._initial_crawl_done = True
+
+        # 确保 Playwright Chromium 已安装（仅首次，阻塞等待）
+        from .crawler.page_screenshot import _ensure_chromium
+        await _ensure_chromium()
 
         logger.info("🚀 执行首次爬取...")
         try:
@@ -297,13 +303,50 @@ class OnePercentNewsPlugin(Star):
             )
             if handled:
                 if reply_text:
-                    chain = [Plain(text=reply_text)]
-                    for seg in ordered_content:
-                        if seg.get("type") == "text":
-                            chain.append(Plain(text=seg["text"]))
-                        elif seg.get("type") == "image":
-                            chain.append(Image(seg["url"]))
-                    yield event.chain_result(chain)
+                    display_mode = self.config.get("detail_display_mode", "text_image")
+                    image_buf = None
+
+                    if display_mode in ("playwright", "pillow"):
+                        post = self.cache.get_post_by_index(index, self.config.get("list_count", 10))
+                        if post:
+                            if display_mode == "playwright":
+                                from .crawler.page_screenshot import capture_post_screenshot
+                                try:
+                                    image_buf = await capture_post_screenshot(post.post_id)
+                                except Exception as e:
+                                    logger.warning(f"Playwright 截图失败: {e}")
+                            if not image_buf and display_mode == "pillow":
+                                try:
+                                    image_buf = await render_post_to_image(post)
+                                except Exception as e:
+                                    logger.warning(f"Pillow 渲染失败: {e}")
+                            if image_buf:
+                                yield event.chain_result([Image(write_temp_image(image_buf))])
+                            else:
+                                logger.warning(f"图片生成失败，回退图文: {post.title[:20]}")
+                                chain = [Plain(text=reply_text)]
+                                for seg in ordered_content:
+                                    if seg.get("type") == "text":
+                                        chain.append(Plain(text=seg["text"]))
+                                    elif seg.get("type") == "image":
+                                        chain.append(Image(seg["url"]))
+                                yield event.chain_result(chain)
+                        else:
+                            chain = [Plain(text=reply_text)]
+                            for seg in ordered_content:
+                                if seg.get("type") == "text":
+                                    chain.append(Plain(text=seg["text"]))
+                                elif seg.get("type") == "image":
+                                    chain.append(Image(seg["url"]))
+                            yield event.chain_result(chain)
+                    else:
+                        chain = [Plain(text=reply_text)]
+                        for seg in ordered_content:
+                            if seg.get("type") == "text":
+                                chain.append(Plain(text=seg["text"]))
+                            elif seg.get("type") == "image":
+                                chain.append(Image(seg["url"]))
+                        yield event.chain_result(chain)
                 event.stop_event()
             return
 
